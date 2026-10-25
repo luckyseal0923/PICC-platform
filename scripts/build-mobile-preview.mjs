@@ -7,6 +7,6 @@ css+="\n/* Preview frame only; the three live routes use normal responsive sizin
 await writeFile("static/mobile-preview.css",css);
 const page=(await readFile("static/entry.html","utf8"))
   .replace("<title>PICC 手機入口</title>","<title>PICC 建案手機預覽 · 390px</title>")
-  .replace('href="/assets/entry.css"','href="/assets/mobile-preview.css"');
+  .replace(/href="\/assets\/entry\.css(?:\?v=[a-f0-9]+)?"/,'href="/assets/mobile-preview.css"');
 await writeFile("static/mobile-preview.html",page);
 console.log("Updated local mobile preview to the focused create entry.");

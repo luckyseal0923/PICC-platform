@@ -75,6 +75,15 @@ test("completion keeps the actual performer and original task version",async()=>
   assert.equal(sent.version,3);assert.equal(sent.operatorId,"demo-b");assert.equal(sent.remark,"DEMO");
 });
 
+test("self-report requires a confirmed completed response and preserves retry identity on an ambiguous result",async()=>{
+  const payloads=[];let confirmed=false;
+  const {client}=scenario((path,options)=>{payloads.push(JSON.parse(options.body));return response({task:{id:"self-report",status:confirmed?"completed":"pending"}});});
+  await client.boot();const values={patientName:"測試甲D",mrn:"00123456",bedNo:"TEST",selfReport:true,operatorId:"demo-b",vein:"其他"};
+  await assert.rejects(()=>client.create(values),/未確認案件結果/);
+  confirmed=true;assert.equal((await client.create(values)).status,"completed");
+  assert.equal(payloads[0].requestId,payloads[1].requestId);
+});
+
 test("other cancellation requires text and submits no reopen operation",async()=>{
   const {client,calls}=scenario(()=>response({task:{id:"task",status:"cancelled"}}));
   await client.boot();await assert.rejects(()=>client.cancel({id:"task",version:3},"其他"," "),/補充說明/);

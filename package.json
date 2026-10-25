@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test": "node scripts/test-all.mjs",
     "test:supabase": "node tests/supabase.test.mjs",
     "test:entries": "node --test tests/entry-controller.test.mjs",
     "build:client": "node scripts/build-client.mjs"

@@ -30,7 +30,7 @@ function decorate(root = document) {
 }
 const labels = {active:"所有案件",pending:"新開案",claimed:"等候施打",awaiting_report:"等候施打",completed:"完成",cancelled:"已取消"};
 const activeStatuses=["pending","claimed"];
-const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_report:"曾標記待回報",workflow_merged:"流程調整：併入等候施打",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"等候施打公告",announce_pending:"等候施打公告"};
+const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_report:"曾標記待回報",workflow_merged:"流程調整：併入等候施打",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",legacy_imported:"匯入舊案件",legacy_cancelled_imported:"由舊備註轉為取消",member_updated:"更新團隊成員",announcement_requested:"等候施打公告",announce_pending:"等候施打公告"};
 const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",requestId:"",detail:null};
 const dateFormatter = new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
 function fmt(value) { if (!value) return "未記錄"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "未記錄" : dateFormatter.format(d); }

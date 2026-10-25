@@ -79,6 +79,13 @@ await test("right lower limb is accepted by the real report validator",async()=>
   const t=await claim(await create({mrn:"DEMO-RIGHT-LEG-V3"}),C);
   assert.equal((await rpc(A,"tasks.complete",{id:t.id,version:t.version,...report,insertionSite:"右下肢"})).task.insertionSite,"右下肢");
 });
+await test("other vein is accepted and retained for self-report and booked completion",async()=>{
+  const self=await entry("tasks.create",{patientName:"測試乙D",bedNo:"TEST",mrn:"DEMO-OTHER-VEIN-SELF",requestId:"other-vein-self",selfReport:true,...report,vein:"其他"});
+  assert.equal(self.task.status,"completed");assert.equal(self.task.vein,"其他");
+  const claimed=await claim(await create({mrn:"DEMO-OTHER-VEIN-CLAIMED"}),C);
+  const done=(await entry("tasks.complete",{id:claimed.id,version:claimed.version,...report,vein:"其他"})).task;
+  assert.equal(done.status,"completed");assert.equal(done.vein,"其他");
+});
 await test("seven-day duplicate warning is shared across actors, does not create a row and permits acknowledged idempotent submission",async()=>{
   await create({mrn:"DEMO-DUPLICATE-V3"});
   const payload={patientName:"DEMO duplicate",bedNo:"TEST",mrn:" DEMO-DUPLICATE-V3 ",requestId:"warn-v3"};

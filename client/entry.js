@@ -61,7 +61,7 @@ function renderSelfReportComplete(task){
   $("#pageDescription").textContent="此病人的建案與施打紀錄已儲存。";
   $("#pageMessage").hidden=true;
   const completed=new Date(task.completedAt);
-  const completedTime=task.completedAt&&!Number.isNaN(completed.getTime())?new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(completed):"未記錄";
+  const completedTime=task.completedAt&&!Number.isNaN(completed.getTime())?new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(completed):"未記錄";
   $("#entryContent").innerHTML='<section class="card completion-card" role="status" tabindex="-1"><span class="completion-mark" aria-hidden="true">✓</span><h2>起單與施打回報完成</h2><p class="help">此筆案件已完成，不需要再次送出。</p>'+patientSummary(task)+'<dl class="completion-details"><div><dt>實際施打者</dt><dd>'+escape(task.operatorName||"未記錄施打者")+'</dd></div><div><dt>完成時間</dt><dd>'+escape(completedTime)+'</dd></div></dl><p class="help">案件已歸檔，可在電腦版「案件管理」查閱。</p></section>';
   $(".completion-card").focus();
 }
