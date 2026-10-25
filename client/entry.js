@@ -56,6 +56,15 @@ function renderCreate(){
     '<button class="button primary full" type="submit">'+(state.selfReport?"送出施打回報":"送出")+'</button></form>'+
     (!state.original&&!state.selfReport?'<button class="button self-report full" type="button" data-action="toggle-self">自起單・自回報</button>':"")+'</section>';
 }
+function renderSelfReportComplete(task){
+  $("#pageTitle").textContent="PICC 起單與回報完成";
+  $("#pageDescription").textContent="此病人的建案與施打紀錄已儲存。";
+  $("#pageMessage").hidden=true;
+  const completed=new Date(task.completedAt);
+  const completedTime=task.completedAt&&!Number.isNaN(completed.getTime())?new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(completed):"未記錄";
+  $("#entryContent").innerHTML='<section class="card completion-card" role="status" tabindex="-1"><span class="completion-mark" aria-hidden="true">✓</span><h2>起單與施打回報完成</h2><p class="help">此筆案件已完成，不需要再次送出。</p>'+patientSummary(task)+'<dl class="completion-details"><div><dt>實際施打者</dt><dd>'+escape(task.operatorName||"未記錄施打者")+'</dd></div><div><dt>完成時間</dt><dd>'+escape(completedTime)+'</dd></div></dl><p class="help">案件已歸檔，可在電腦版「案件管理」查閱。</p></section>';
+  $(".completion-card").focus();
+}
 function waiting(task){
   const created=new Date(task.createdAt);if(Number.isNaN(created.getTime()))return "等待時間未記錄";
   const hours=Math.max(0,Math.floor((Date.now()-created.getTime())/3600000));
@@ -162,9 +171,12 @@ document.addEventListener("submit",async event=>{
       const task=await client.create({...values,duplicateAcknowledged:values.duplicateAcknowledged==="true",selfReport:state.selfReport,...(state.original?{copiedFromTaskId:state.original.id}:{})});
       const selfReport=state.selfReport;state.draft={};state.original=null;state.selfReport=false;
       if(new URLSearchParams(location.search).has("from"))history.replaceState(null,"",location.pathname);
-      renderCreate();
-      message(selfReport?"已完成自起單與回報，施打量已更新。":"建案成功，案件已建立。",false,
-        '<p class="receipt-details">任務編號：'+escape(task.taskId)+'</p>'+link(selfReport?'report':'booking',selfReport?'查看等候施打清單':'前往預約施打'));
+      if(selfReport)renderSelfReportComplete(task);
+      else{
+        renderCreate();
+        message("建案成功，案件已建立。",false,
+          '<p class="receipt-details">任務編號：'+escape(task.taskId)+'</p>'+link('booking','前往預約施打'));
+      }
     }else if(form.dataset.form==="claim"){
       const task=await client.claim(findTask(form.dataset.id),values.operatorId);
       await afterWrite(task,"預約完成，案件已移至等候施打清單。",link("report","前往施打回報",task.id));

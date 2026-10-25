@@ -158,7 +158,7 @@ begin
   if coalesce(p_data->>'difficulty','') not in ('非常簡單','簡單','中等','困難','非常困難') then
     raise exception '請選擇放置困難度'; end if;
   if coalesce(p_data->>'insertionSite','') not in ('右上臂','左上臂','左下肢','右下肢','其他') then raise exception '請選擇施打位置'; end if;
-  if coalesce(p_data->>'vein','') not in ('Basilic','Cephalic','Brachial') then raise exception '請選擇血管'; end if;
+  if coalesce(p_data->>'vein','') not in ('Basilic','Cephalic','Brachial','其他') then raise exception '請選擇血管'; end if;
   if coalesce(p_data->>'catheterType','') not in ('雙腔PICC','單腔PICC') then raise exception '請選擇管路類型'; end if;
   n:=nullif(p_data->>'catheterLength','')::numeric;
   if n is not null and (n<=0 or n::text in ('NaN','Infinity','-Infinity')) then raise exception '管路長度須為正數'; end if;

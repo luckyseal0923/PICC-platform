@@ -64,7 +64,7 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
         const error=new Error("七日內已有相同病歷號案件，請確認是否重複開單。");
         error.duplicateWarning=true;error.duplicateCount=result.duplicateCount;throw error;
       }
-      const task=updated(result);
+      const task=updated(result,values.selfReport?"completed":null);
       draft=null;return task;
     },
     async claim(task,operatorId){

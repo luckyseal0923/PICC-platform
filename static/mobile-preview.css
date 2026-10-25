@@ -50,6 +50,8 @@ input::placeholder,textarea::placeholder{color:#748591;opacity:1}textarea{min-he
 .case-actions{display:flex;gap:11px;flex-wrap:wrap;margin-top:22px}.case-actions .primary{flex:1}.case-cancel{display:flex;justify-content:flex-end;margin-top:9px}.case-cancel .quiet-button{font-size:13px;color:#8a5148}
 .empty{padding:45px 25px;text-align:center;color:var(--muted);border-top:3px solid var(--accent)}.empty h2{color:#304f62;font-size:21px;margin-bottom:10px}.empty p{font-size:15px}.empty .button{margin-top:24px}
 .patient-summary{background:#f3f7f9;border:1px solid var(--border);border-radius:12px;padding:18px;margin:20px 0}.patient-summary strong{font-size:21px}.patient-summary p{font-size:14px;color:#506a7b;margin-top:6px}
+.completion-card{border-top:3px solid var(--accent)}.completion-card:focus{outline:none}.completion-mark{display:flex;align-items:center;justify-content:center;width:52px;height:52px;margin-bottom:18px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:30px;font-weight:750}
+.completion-details{margin:20px 0;padding:0}.completion-details>div+div{margin-top:16px}.completion-details dt{color:var(--muted);font-size:13px}.completion-details dd{margin:3px 0 0;font-size:17px;font-weight:650;overflow-wrap:anywhere}
 .reorder-note{background:#fff5e7;border:1px solid #e5cda6;color:#77501c;border-radius:11px;padding:16px;margin-bottom:24px;font-size:14px}
 .loading{padding:40px 0;color:var(--muted)}
 dialog{padding:26px;border:1px solid #cbd9e0;border-radius:20px;width:min(610px,calc(100% - 24px));max-height:92vh;max-height:92dvh;overflow:auto;color:var(--ink);background:#fff;box-shadow:0 24px 90px #0f263543}dialog::backdrop{background:#102b3f80;backdrop-filter:blur(4px)}

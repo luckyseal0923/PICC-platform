@@ -29,7 +29,7 @@ TAIPEI = timezone(timedelta(hours=8))
 STATUSES = {"pending": "新開案", "claimed": "等候施打", "awaiting_report": "等候施打", "completed": "完成", "cancelled": "已取消"}
 DIFFICULTIES = ["非常簡單", "簡單", "中等", "困難", "非常困難"]
 SITES = ["右上臂", "左上臂", "左下肢", "右下肢", "其他"]
-VEINS = ["Basilic", "Cephalic", "Brachial"]
+VEINS = ["Basilic", "Cephalic", "Brachial", "其他"]
 CATHETERS = ["雙腔PICC", "單腔PICC"]
 CANCEL_REASONS = ["暫不需要施打", "醫囑調整", "病人因素", "等待時間過久", "其他"]
 SHARED_ENTRY_ID = "00000000-0000-4000-8000-000000000001"
