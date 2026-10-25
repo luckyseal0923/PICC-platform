@@ -1,0 +1,18 @@
+{
+  "name": "picc-v2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test:supabase": "node tests/supabase.test.mjs",
+    "test:entries": "node --test tests/entry-controller.test.mjs",
+    "build:client": "node scripts/build-client.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.0",
+    "esbuild": "^0.25.0"
+  }
+}

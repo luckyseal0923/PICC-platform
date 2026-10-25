@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+dist/** linguist-generated
+static/entry.js linguist-generated
+static/mobile-preview.css linguist-generated
+static/mobile-preview.html linguist-generated
+# The SDK contains intentional literal spaces/tabs in a JavaScript template string.
+static/supabase-adapter.js linguist-generated -whitespace
+dist/assets/supabase-adapter.js -whitespace

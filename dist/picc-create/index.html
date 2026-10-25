@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f5f7fa"><meta name="referrer" content="no-referrer">
+  <title>PICC 手機入口</title>
+  <link rel="stylesheet" href="/assets/entry.css">
+  <script src="/assets/config.js" defer></script>
+  <script src="/assets/supabase-adapter.js" defer></script>
+  <script src="/assets/entry.js" defer></script>
+</head>
+<body data-page="create">
+<main class="entry-page">
+  <div class="session-bar"><span>院內 PICC 團隊</span></div>
+  <header class="page-heading"><p id="previewLabel" class="demo-label" hidden>示範資料 · 僅本機測試</p><h1 id="pageTitle">PICC 任務建立</h1><p id="pageDescription">填寫病人資料，建立一筆待預約案件。</p></header>
+  <div id="pageMessage" class="message" role="status" hidden></div>
+  <section id="entryContent"><p class="loading">正在讀取資料…</p></section>
+  <noscript><p class="message">請啟用 JavaScript 後使用 PICC 建案與回報功能。</p></noscript>
+</main>
+<dialog id="entryDialog" aria-labelledby="dialogTitle"><div class="dialog-heading"><h2 id="dialogTitle"></h2><button type="button" class="quiet-button" data-action="close-dialog" aria-label="關閉視窗">關閉</button></div><div id="dialogBody"></div></dialog>
+</body></html>
