@@ -54,7 +54,7 @@ function renderCreate(){
     '<label for="patientName">病人姓名 *</label><input id="patientName" name="patientName" maxlength="100" placeholder="請輸入病人姓名" autocomplete="off" required value="'+escape(values.patientName||"")+'">'+
     (state.selfReport?reportFields(values):"")+notes(values.remark||"")+'<div id="duplicateWarning" class="message duplicate-warning" role="alert" tabindex="-1" hidden></div>'+
     '<button class="button primary full" type="submit">'+(state.selfReport?"送出施打回報":"送出")+'</button></form>'+
-    (!state.original?'<button class="button self-report full" type="button" data-action="toggle-self">'+(state.selfReport?"改為一般建案":"自起單・自回報")+'</button>':"")+'</section>';
+    (!state.original&&!state.selfReport?'<button class="button self-report full" type="button" data-action="toggle-self">自起單・自回報</button>':"")+'</section>';
 }
 function waiting(task){
   const created=new Date(task.createdAt);if(Number.isNaN(created.getTime()))return "等待時間未記錄";
