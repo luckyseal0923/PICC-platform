@@ -66,7 +66,7 @@ await test("disabling the desktop actor closes the full workspace without changi
 await test("awaiting report survives migration, preserves audit and does not count until report completion",async()=>{
   let t=await claim(await create({mrn:"DEMO-AWAITING-V3"}),C);const before=(await rpc(A,"stats")).totalCompleted;
   const stale=t.version;t=(await entry("tasks.performed",{id:t.id,version:t.version})).task;
-  assert.equal(t.status,"awaiting_report");assert.equal(t.statusLabel,"施打回報");assert.equal((await rpc(A,"stats")).totalCompleted,before);
+  assert.equal(t.status,"awaiting_report");assert.equal(t.statusLabel,"待施打回報");assert.equal((await rpc(A,"stats")).totalCompleted,before);
   await assert.rejects(()=>entry("tasks.performed",{id:t.id,version:stale}),/其他人更新/);
   await db.exec(await readFile(new URL("../supabase/migrations/202610140001_picc_v2.sql",import.meta.url),"utf8"));
   assert.equal((await entry("tasks.get",{id:t.id})).task.status,"awaiting_report");

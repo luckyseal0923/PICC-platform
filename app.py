@@ -26,7 +26,7 @@ if (ROOT / ".vendor").exists():
 from flask import Flask, g, jsonify, make_response, request, session, send_from_directory
 
 TAIPEI = timezone(timedelta(hours=8))
-STATUSES = {"pending": "新開案", "claimed": "待預約", "awaiting_report": "施打回報", "completed": "完成", "cancelled": "已取消"}
+STATUSES = {"pending": "新開案", "claimed": "待預約", "awaiting_report": "待施打回報", "completed": "完成", "cancelled": "已取消"}
 DIFFICULTIES = ["非常簡單", "簡單", "中等", "困難", "非常困難"]
 SITES = ["右上臂", "左上臂", "左下肢", "右下肢", "其他"]
 VEINS = ["Basilic", "Cephalic", "Brachial"]
@@ -588,7 +588,7 @@ def create_app(config=None):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
         if row["status"] != "claimed":
-            raise ApiError("只有待預約案件可以標記施打回報", 409)
+            raise ApiError("只有待預約案件可以標記待施打回報", 409)
         db().execute("UPDATE tasks SET status='awaiting_report',updated_at=?,version=version+1 WHERE id=?", (now(), task_id))
         audit(task_id, "awaiting_report", u, {"previousStatus": "claimed"})
         return jsonify(ok=True, task=task_json(task_row(task_id)))
@@ -600,7 +600,7 @@ def create_app(config=None):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
         if row["status"] not in ("claimed", "awaiting_report"):
-            raise ApiError("只有待預約或施打回報案件可以回報完成", 409)
+            raise ApiError("只有待預約或待施打回報案件可以回報完成", 409)
         report = report_values(data)
         db().execute("UPDATE tasks SET status='completed',operator_id=?,operator_name=?,completed_at=?,difficulty=?,"
                      "insertion_site=?,vein=?,catheter_type=?,catheter_length=?,remark=?,updated_at=?,"
@@ -777,7 +777,7 @@ def create_app(config=None):
                 skipped += 1; continue
             status = text(raw.get("狀態代碼"))
             if not status:
-                status = {"待預約":"pending", "待施打":"claimed", "待回報":"awaiting_report", "新開案":"pending", "施打回報":"awaiting_report", "完成":"completed", "已取消":"cancelled"}.get(raw.get("Status"))
+                status = {"待預約":"pending", "待施打":"claimed", "待回報":"awaiting_report", "新開案":"pending", "施打回報":"awaiting_report", "待施打回報":"awaiting_report", "完成":"completed", "已取消":"cancelled"}.get(raw.get("Status"))
             if status not in STATUSES:
                 status = None
             if not status:

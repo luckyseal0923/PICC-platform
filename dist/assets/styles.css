@@ -159,10 +159,11 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 .workbench-table{min-width:940px;font-size:14px}
 .workbench-table th{padding:14px 13px;font-size:12px}
 .workbench-table td{padding:17px 13px;white-space:nowrap}
-.workbench-table .case-number{font-size:12px;font-weight:600;color:#426879;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.workbench-table .identity-cell .mrn-number{display:block;color:#163b4b;font-size:18px;font-weight:750;letter-spacing:.6px;font-variant-numeric:tabular-nums}
+.workbench-table .identity-cell .case-number{display:block;margin-top:5px;font-size:11px;font-weight:400;color:#647d8b;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.workbench-table .created-cell{font-size:13px;color:#405a6a;font-variant-numeric:tabular-nums}
 .workbench-table .patient-cell strong{font-size:15px}
 .workbench-table .patient-cell .difficult{display:block;margin-top:5px;font-size:11px}
-.workbench-table .mrn-cell{font-variant-numeric:tabular-nums;letter-spacing:.4px;color:#344f61}
 .workbench-table .assignee-cell strong{display:inline-block;padding:5px 9px;border:1px solid #cde1d9;border-radius:7px;background:#edf6f1;color:#176653;font-size:14px;font-weight:650}
 .workbench-table .assignee-cell.unassigned strong{background:#f3f5f7;border-color:#e0e7eb;color:#687d8a;font-size:13px;font-weight:400}
 .workbench-table .table-actions{align-items:center;gap:5px}
