@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/assets/styles.css?v=a31997ed8798">
   <script src="/assets/config.js" defer></script>
   <script src="/assets/supabase-adapter.js?v=a7691a216d08" defer></script>
-  <script src="/assets/app.js?v=2d279138f8c9" defer></script>
+  <script src="/assets/app.js?v=ec89fb3a0a17" defer></script>
 </head>
 <body>
 <div id="app" class="app-shell">
@@ -18,7 +18,7 @@
       <button class="nav-link active" data-view="board"><span data-icon="grid"></span>工作台</button>
       <button class="nav-link" data-view="stats"><span data-icon="chart"></span>施打統計</button>
       <div class="nav-heading admin-only">管理</div>
-      <button class="nav-link admin-only" data-view="admin"><span data-icon="table"></span>全部案件</button>
+      <button class="nav-link admin-only" data-view="admin"><span data-icon="table"></span>案件管理</button>
       <button class="nav-link admin-only" data-view="members"><span data-icon="users"></span>團隊成員</button>
       <button class="nav-link admin-only" data-view="notifications"><span data-icon="bell"></span>通知紀錄</button>
     </nav>
@@ -28,7 +28,7 @@
   <div class="workspace">
     <header class="topbar"><span class="institution"><span data-icon="cross"></span><strong>院內 PICC 團隊</strong><span class="topbar-separator" aria-hidden="true">/</span><span>團隊工作站</span></span><div class="topbar-right"><span class="pill demo-banner" id="demoBanner" hidden>示範資料 · 本機新版</span><span id="today"></span><button id="refresh" class="icon-button" aria-label="重新整理"><span data-icon="refresh"></span></button></div></header>
     <main>
-      <div class="page-header"><div><p class="eyebrow" id="viewEyebrow">TEAM WORKSPACE</p><h1 id="viewTitle">工作台</h1><p id="viewDescription" class="muted">聚焦新開案、待預約與待施打回報；完成後可至全部案件查閱。</p></div><button class="button primary" id="newTask" disabled><span data-icon="plus"></span>新增任務</button></div>
+      <div class="page-header"><div><p class="eyebrow" id="viewEyebrow">TEAM WORKSPACE</p><h1 id="viewTitle">工作台</h1><p id="viewDescription" class="muted">聚焦新開案、待預約與待施打回報；完成後可至案件管理查閱。</p></div><button class="button primary" id="newTask" disabled><span data-icon="plus"></span>新增任務</button></div>
       <div id="mainContent" aria-live="polite"><section class="panel"><div class="panel-body"><h2>正在連接資料…</h2></div></section></div>
     </main>
     <footer class="page-footer"><span>PICC 團隊工作站</span><span id="updatedTime">資料讀取中…</span></footer>
