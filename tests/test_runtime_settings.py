@@ -51,6 +51,14 @@ class RuntimeSettings(unittest.TestCase):
             self.assertIn("wss://database.example.test",csp)
             self.assertNotIn("connect-src *",csp)
 
+    def test_desktop_and_phone_html_do_not_keep_an_old_deployment(self):
+        client=self.app().test_client()
+        for route in ("/", "/workspace/", "/picc-create/", "/picc-booking/", "/picc-report/"):
+            with client.get(route) as result:
+                self.assertEqual(result.status_code,200)
+                self.assertEqual(result.headers["Cache-Control"],"no-store")
+                self.assertRegex(result.text,r'/assets/[a-z-]+\.js\?v=[a-f0-9]{12}')
+
     def test_invalid_public_origins_are_rejected(self):
         for url in ("http://external.example.test","https://user:password@example.test","https://example.test/?key=secret","https://evil.example.test';connect-src *"):
             with self.assertRaises(ValueError):

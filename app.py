@@ -253,7 +253,7 @@ def create_app(config=None):
             "frame-src https://access.line.me https://liff.line.me; "
             "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
         )
-        if request.path.startswith("/api/"):
+        if request.path.startswith("/api/") or response.mimetype == "text/html":
             response.headers["Cache-Control"] = "no-store"
         return response
 
