@@ -29,7 +29,7 @@ function decorate(root = document) {
 const labels = {active:"所有案件",pending:"新開案",claimed:"待預約",awaiting_report:"待施打回報",completed:"完成",cancelled:"已取消"};
 const activeStatuses=["pending","claimed","awaiting_report"];
 const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_report:"已施打，待施打回報",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"待預約公告",announce_pending:"待預約公告"};
-const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",statsMode:"volume",outcomeStart:"",outcomeEnd:"",requestId:"",detail:null};
+const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",requestId:"",detail:null};
 const dateFormatter = new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
 function fmt(value) { if (!value) return "未記錄"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "未記錄" : dateFormatter.format(d); }
 function createdTime(value) {
@@ -174,9 +174,6 @@ function chart(items) {
   const max=Math.max(1,...items.map(i=>i.count));
   return '<div class="chart">'+items.map(i=>'<div class="chart-column"><strong>'+i.count+'</strong><div class="chart-bar" data-height="'+Math.round(i.count/max*135)+'"></div><span>'+esc(i.month)+'</span></div>').join("")+'</div>';
 }
-function statisticsTabs(){
-  return '<div class="tabs statistics-tabs"><button class="tab '+(state.statsMode==="volume"?'active':'')+'" data-action="stats-volume">個別施打量</button><button class="tab '+(state.statsMode==="outcomes"?'active':'')+'" data-action="stats-outcomes">案件成效與取消原因</button></div>';
-}
 function median(values){
   if(!values.length)return null;const sorted=[...values].sort((a,b)=>a-b),middle=Math.floor(sorted.length/2);
   return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;
@@ -199,22 +196,32 @@ function computeOutcomes(tasks,start="",end=""){
 }
 function percentLabel(value){return value===null?"—":value.toFixed(1)+"%";}
 function durationLabel(hours){if(hours===null)return "未記錄";if(hours<1)return hours*60<1?"不到 1 分鐘":Math.round(hours*60)+" 分鐘";return hours<24?hours.toFixed(1)+" 小時":(hours/24).toFixed(1)+" 天";}
-function renderOutcomes(){
-  const result=computeOutcomes(state.tasks,state.outcomeStart,state.outcomeEnd);
-  return statisticsTabs()+'<div class="filters"><div class="field"><label for="outcomeStart">起單日期從</label><input id="outcomeStart" type="date" value="'+state.outcomeStart+'"></div><div class="field"><label for="outcomeEnd">起單日期至</label><input id="outcomeEnd" type="date" value="'+state.outcomeEnd+'"></div><button class="button primary" data-action="filter-outcomes">查詢</button><button class="button secondary" data-action="all-outcomes">不限日期</button><button class="button secondary" data-action="export-outcomes">成效 CSV</button></div>'+
-    '<div class="alert info-alert">以起單日期追蹤同一批案件。完成率與未施打率以已結案案件為分母，進行中案件另列；結果會隨後續結案更新。</div>'+
-    '<div class="summary-row outcome-summary"><div class="summary-tile"><p>起單案件數</p><b>'+result.total+'</b><small>本次查詢的案件總數</small></div><div class="summary-tile"><p>完成施打率（已結案）</p><b>'+percentLabel(result.completionRate)+'</b><small>完成 '+result.completed+'／結案 '+result.closed+' 件</small></div><div class="summary-tile"><p>未施打率（已結案）</p><b>'+percentLabel(result.nonPerformedRate)+'</b><small>取消 '+result.cancelled+'／結案 '+result.closed+' 件</small></div><div class="summary-tile"><p>仍在進行</p><b>'+result.active+'</b><small>尚未結案，不算未施打</small></div></div>'+
-    '<div class="stat-columns"><section class="panel"><div class="panel-head"><h2>起單案件目前結果</h2></div><div class="panel-body"><p class="outcome-line">已完成施打 <strong>'+result.completed+' 件</strong></p><p class="outcome-line">已取消施打 <strong>'+result.cancelled+' 件</strong></p><p class="outcome-line">進行中 <strong>'+result.active+' 件</strong></p><p class="outcome-caption">全部起單案件的取消比例：'+percentLabel(result.cancellationRate)+'（取消／全部起單）</p><button class="button secondary" data-action="outcome-cancelled">查看取消案件</button></div></section><section class="panel"><div class="panel-head"><h2>處理時效</h2><small>中位時間</small></div><div class="panel-body"><p class="outcome-line">起單至完成回報 <strong>'+durationLabel(result.medianCompletionHours)+'</strong></p><p class="outcome-line">起單至取消 <strong>'+durationLabel(result.medianCancellationHours)+'</strong></p><p class="outcome-caption">只使用有效時間紀錄。等待較久不會自動歸因為延遲取消，原因依取消時填寫的內容。</p></div></section></div>'+
-    '<section class="panel section-spacer"><div class="panel-head"><h2>取消原因</h2><small>以 '+result.cancelled+' 件取消案件為分母</small></div><div class="table-scroll"><table><thead><tr><th>原因</th><th>件數</th><th>占取消案件</th><th>起單至取消中位時間</th></tr></thead><tbody>'+result.reasons.map(reason=>'<tr><td><strong>'+esc(reason.reason)+'</strong></td><td>'+reason.count+'</td><td><div class="volume-bar"><div class="volume-track"><div class="volume-fill" data-width="'+reason.percent+'"></div></div>'+percentLabel(reason.percent)+'</div></td><td>'+durationLabel(reason.medianHours)+'</td></tr>').join("")+'</tbody></table>'+(result.reasons.length?"":empty("此期間尚無取消案件"))+'</div></section>';
+function metricMonthDomain(){
+  const observed=[...(state.stats.months||[]),...(state.stats.createdMonths||[])].map(row=>row.month).filter(month=>/^\d{4}-\d{2}$/.test(month)).sort();
+  const current=taipeiDate().slice(0,4),first=Number((state.statsStart||observed[0]||current).slice(0,4)),last=Number((state.statsEnd||observed.at(-1)||String(first)).slice(0,4));
+  const months=[];for(let year=first;year<=Math.max(first,last);year++)for(let month=1;month<=12;month++)months.push(String(year).padStart(4,"0")+"-"+String(month).padStart(2,"0"));
+  return months;
+}
+function metricMonthChart(items,kind){
+  const months=metricMonthDomain(),counts=new Map(items.map(row=>[row.month,Number(row.count)||0])),max=Math.max(1,...counts.values()),singleYear=months.length===12;
+  return '<div class="monthly-chart-scroll"><div class="chart monthly-chart '+kind+'">'+months.map(month=>{
+    const outside=(state.statsStart&&month<state.statsStart.slice(0,7))||(state.statsEnd&&month>state.statsEnd.slice(0,7)),count=counts.get(month)||0;
+    const label=singleYear?Number(month.slice(5))+"月":month.replace("-","/");
+    return '<div class="chart-column '+(outside?'outside-period':count===0?'zero-month':'')+'" title="'+month+'：'+(outside?'不在統計期間':count+' 件')+'"><strong>'+(outside?'—':count)+'</strong><div class="chart-bar" data-height="'+Math.round(count/max*150)+'"></div><span>'+label+'</span></div>';
+  }).join("")+'</div></div>';
 }
 function renderStats() {
-  const s=state.stats, operators=s.operators||[], total=s.totalCompleted||0, difficult=operators.reduce((a,b)=>a+b.difficultCount,0);
-  return statisticsTabs()+'<div class="filters"><div class="field"><label for="statsStart">完成日期從</label><input id="statsStart" type="date" value="'+state.statsStart+'"></div><div class="field"><label for="statsEnd">完成日期至</label><input id="statsEnd" type="date" value="'+state.statsEnd+'"></div><button class="button primary" data-action="filter-stats">查詢</button><button class="button secondary" data-action="all-stats">不限日期</button><button class="button secondary" data-action="export-stats">'+icon("download")+'統計 CSV</button></div>'+
-  '<div class="alert info-alert">'+esc(s.basis||"")+'</div>'+
-  (s.missingCompletionDate?'<div class="alert">有 '+s.missingCompletionDate+' 筆舊完成案件缺少完成日期。不限日期的總量保留，期間與逐月施打量不納入這些案件。</div>':"")+
-  '<div class="summary-row"><div class="summary-tile"><p>完成施打量</p><b>'+total+'</b><small>取消案件不計入</small></div><div class="summary-tile"><p>實際施打者</p><b>'+operators.length+'</b><small>依本次查詢範圍</small></div><div class="summary-tile"><p>困難／非常困難</p><b>'+difficult+'</b><small>完成案件的放置紀錄</small></div></div>'+
-  '<section class="panel"><div class="panel-head"><h2>個別施打者完成量</h2><small>以完成日期統計</small></div><div class="table-scroll"><table><thead><tr><th>施打者</th><th>完成量</th><th>困難案件</th><th>佔完成量</th></tr></thead><tbody>'+operators.map(o=>'<tr><td><strong>'+esc(o.operatorName)+'</strong>'+(o.operatorId===state.user.id?'<small>您的施打紀錄</small>':"")+'</td><td><strong>'+o.count+' 筆</strong></td><td>'+o.difficultCount+' 筆</td><td><div class="volume-bar"><div class="volume-track"><div class="volume-fill" data-width="'+(total?o.count/total*100:0)+'"></div></div><span>'+(total?Math.round(o.count/total*100):0)+'%</span></div></td></tr>').join("")+'</tbody></table>'+(operators.length?"":empty("此期間沒有完成施打紀錄"))+'</div></section>'+
-  '<div class="stat-columns"><section class="panel"><div class="panel-head"><h2>逐月完成施打量</h2><small>完成月份</small></div><div class="panel-body">'+chart(s.months||[])+'</div></section><section class="panel"><div class="panel-head"><h2>逐月起單案件數</h2><small>全部案件 · 起單月份</small></div><div class="panel-body">'+chart(s.createdMonths||[])+'</div></section></div>';
+  const s=state.stats,operators=s.operators||[],total=s.totalCompleted||0,difficult=operators.reduce((sum,row)=>sum+row.difficultCount,0);
+  const result=computeOutcomes(state.tasks,state.statsStart,state.statsEnd),months=metricMonthDomain(),yearLabel=months.length===12?months[0].slice(0,4)+' 年':months[0].slice(0,4)+'–'+months.at(-1).slice(0,4)+' 年';
+  const controls='<div class="filters"><div class="field"><label for="statsStart">統計起日</label><input id="statsStart" type="date" value="'+state.statsStart+'"></div><div class="field"><label for="statsEnd">統計迄日</label><input id="statsEnd" type="date" value="'+state.statsEnd+'"></div><button class="button primary" data-action="filter-stats">查詢</button><button class="button secondary" data-action="year-stats">本年度</button><button class="button secondary" data-action="all-stats">不限日期</button><button class="button secondary" data-action="export-stats">施打量 CSV</button><button class="button secondary" data-action="export-outcomes">案件成效 CSV</button></div>';
+  const summary='<div class="alert info-alert">施打量依完成日期計算；起單件數、結案比例與取消原因，依起單日期追蹤同一批案件。進行中案件不計為未施打。</div>'+ 
+    (s.missingCompletionDate?'<div class="alert">有 '+s.missingCompletionDate+' 筆舊完成案件缺少完成日期；不限日期的總量保留，逐月與期間施打量不補造日期。</div>':"")+
+    '<div class="summary-row metrics-summary"><div class="summary-tile"><p>起單案件數</p><b>'+result.total+'</b><small>依起單日期</small></div><div class="summary-tile"><p>完成施打量</p><b>'+total+'</b><small>依完成日期；取消不計入</small></div><div class="summary-tile"><p>仍在進行</p><b>'+result.active+'</b><small>本期起單且尚未結案</small></div><div class="summary-tile"><p>完成施打率（已結案）</p><b>'+percentLabel(result.completionRate)+'</b><small>本期起單：完成 '+result.completed+'／結案 '+result.closed+' 件</small></div><div class="summary-tile"><p>未施打率（已結案）</p><b>'+percentLabel(result.nonPerformedRate)+'</b><small>本期起單：取消 '+result.cancelled+'／結案 '+result.closed+' 件</small></div><div class="summary-tile"><p>困難／非常困難施打量</p><b>'+difficult+'</b><small>依完成日期</small></div></div>';
+  const trends='<div class="monthly-panels"><section class="panel monthly-panel"><div class="panel-head"><h2>逐月完成施打量</h2><small>'+yearLabel+' · 依完成日期</small></div><div class="panel-body">'+metricMonthChart(s.months||[],"completed-series")+'</div></section><section class="panel monthly-panel"><div class="panel-head"><h2>逐月起單案件數</h2><small>'+yearLabel+' · 依起單日期</small></div><div class="panel-body">'+metricMonthChart(s.createdMonths||[],"created-series")+'</div></section></div><p class="chart-caption">每年完整呈現 1–12 月；統計期間內沒有案件的月份顯示 0，期間外顯示「—」。</p>';
+  const performers='<section class="panel section-spacer"><div class="panel-head"><h2>個別施打者完成量</h2><small>'+operators.length+' 位施打者 · 依完成日期</small></div><div class="table-scroll"><table><thead><tr><th>施打者</th><th>完成量</th><th>困難案件</th><th>佔完成量</th></tr></thead><tbody>'+operators.map(o=>'<tr><td><strong>'+esc(o.operatorName)+'</strong></td><td><strong>'+o.count+' 筆</strong></td><td>'+o.difficultCount+' 筆</td><td><div class="volume-bar"><div class="volume-track"><div class="volume-fill" data-width="'+(total?o.count/total*100:0)+'"></div></div><span>'+(total?Math.round(o.count/total*100):0)+'%</span></div></td></tr>').join("")+'</tbody></table>'+(operators.length?"":empty("此期間沒有完成施打紀錄"))+'</div></section>';
+  const reasons='<section class="panel section-spacer"><div class="panel-head"><h2>取消原因</h2><small>本期起單的 '+result.cancelled+' 件取消案件</small></div><div class="table-scroll"><table><thead><tr><th>原因</th><th>件數</th><th>占取消案件</th><th>起單至取消中位時間</th></tr></thead><tbody>'+result.reasons.map(reason=>'<tr><td><strong>'+esc(reason.reason)+'</strong></td><td>'+reason.count+'</td><td><div class="volume-bar"><div class="volume-track"><div class="volume-fill" data-width="'+reason.percent+'"></div></div>'+percentLabel(reason.percent)+'</div></td><td>'+durationLabel(reason.medianHours)+'</td></tr>').join("")+'</tbody></table>'+(result.reasons.length?"":empty("此期間尚無取消案件"))+'</div></section>';
+  const timing='<section class="panel section-spacer"><div class="panel-head"><h2>處理時效</h2><small>依起單日期 · 中位時間</small></div><div class="panel-body"><div class="timeliness-grid"><p class="outcome-line">起單至完成回報 <strong>'+durationLabel(result.medianCompletionHours)+'</strong></p><p class="outcome-line">起單至取消 <strong>'+durationLabel(result.medianCancellationHours)+'</strong></p></div><p class="outcome-caption">取消占全部起單：'+percentLabel(result.cancellationRate)+'。僅使用有效時間紀錄；取消原因依填寫內容，不由等待時間自動推定。</p><button class="button secondary" data-action="outcome-cancelled">查看取消案件</button></div></section>';
+  return controls+summary+trends+performers+reasons+timing;
 }
 function renderAdmin() {
   const tasks=visibleTasks(), pages=Math.max(1,Math.ceil(tasks.length/state.pageSize)); state.page=Math.min(state.page,pages);
@@ -240,14 +247,14 @@ async function renderNotifications() {
   const status={simulated:"示範紀錄（未發送）",queued:"待發送",sent:"服務確認送出",failed:"發送未完成",sending:"發送中"};
   return '<div class="alert info-alert">案件寫入與通知結果分開記錄。通知未完成時可重試，無需重複建立或回報案件。</div><section class="panel"><div class="panel-head"><h2>LINE 通知紀錄</h2><button class="button secondary small-button" data-action="announce">預覽待預約公告</button></div><div class="table-scroll"><table><thead><tr><th>時間</th><th>通知事件</th><th>操作人</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+data.notifications.map(n=>'<tr><td>'+fmt(n.created_at)+'</td><td>'+esc(eventLabels[n.event]||n.event)+'</td><td>'+esc(n.actor_name)+'</td><td>'+esc(status[n.status]||n.status)+(n.last_error?'<small>'+esc(n.last_error)+'</small>':"")+'</td><td>'+((n.status==="queued"||n.status==="failed")?'<button class="button secondary small-button" data-action="retry" data-id="'+n.id+'">重試通知</button>':"—")+'</td></tr>').join("")+'</tbody></table>'+(data.notifications.length?"":empty("還沒有通知紀錄","新增或更新案件後會顯示於此。"))+'</div></section>';
 }
-const viewInfo={board:["TEAM WORKSPACE","工作台","聚焦新開案、待預約與待施打回報；完成後可至案件管理查閱。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PRACTICE INSIGHTS","施打統計","按實際施打者與完成日期，掌握個別施打量。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
+const viewInfo={board:["TEAM WORKSPACE","工作台","聚焦新開案、待預約與待施打回報；完成後可至案件管理查閱。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PERFORMANCE INDICATORS","成效指標","整合施打量、案件完成比例、取消原因與處理時效。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
 let renderVersion=0;
 async function render() {
   const version=++renderVersion, info=viewInfo[state.view];
   $("#viewEyebrow").textContent=info[0];$("#viewTitle").textContent=info[1];$("#viewDescription").textContent=info[2];
   document.querySelectorAll("[data-view]").forEach(el=>el.classList.toggle("active",el.dataset.view===state.view));
   let html;
-  if(state.view==="stats") {if(state.statsMode==="outcomes"){html=renderOutcomes();$("#viewTitle").textContent="案件成效";$("#viewDescription").textContent="追蹤完成施打比例、取消原因與案件處理時效。";}else{await loadStats();html=renderStats();}}
+  if(state.view==="stats") {await loadStats();html=renderStats();}
   else if(state.view==="admin") html=renderAdmin();
   else if(state.view==="members") html=renderMembers();
   else if(state.view==="notifications") html=await renderNotifications();
@@ -274,7 +281,7 @@ async function enter(data) {
   $("#profileName").textContent="PICC 團隊";$("#profileInitial").textContent="P";$("#profileRole").textContent="共用工作站";
   document.querySelectorAll(".admin-only").forEach(el=>{el.hidden=state.user.role!=="admin";});
   state.view="board";state.status="active";
-  const today=taipeiDate();state.statsStart=today.slice(0,8)+"01";state.statsEnd=today;state.outcomeStart=today.slice(0,8)+"01";state.outcomeEnd=today;state.statsScope=state.user.role==="admin"?"all":"mine";
+  const today=taipeiDate();state.statsStart=today.slice(0,4)+"-01-01";state.statsEnd=today.slice(0,4)+"-12-31";state.statsScope=state.user.role==="admin"?"all":"mine";
   $("#today").textContent=new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"long",day:"numeric",weekday:"long",timeZone:"Asia/Taipei"}).format(new Date());
   await refresh();
 }
@@ -294,13 +301,10 @@ function showAnnouncement() {
 const actions={
   close:()=>$("#dialog").close(),"create-normal":()=>showCreate(false),"create-self":()=>showCreate(true),
   claim:showClaim,complete:showComplete,cancel:showCancel,reorder:showReorder,edit:showEdit,remove:showRemove,detail:showDetail,member:showMember,import:showImport,announce:showAnnouncement,
-  "stats-volume":()=>{state.statsMode="volume";return render();},
-  "stats-outcomes":()=>{state.statsMode="outcomes";return render();},
-  "filter-outcomes":()=>{const start=$("#outcomeStart").value,end=$("#outcomeEnd").value;if(start&&end&&start>end)throw new Error("開始日期不能晚於結束日期");state.outcomeStart=start;state.outcomeEnd=end;return render();},
-  "all-outcomes":()=>{state.outcomeStart="";state.outcomeEnd="";return render();},
-  "outcome-cancelled":()=>{state.view="admin";state.status="cancelled";state.query="";state.page=1;state.adminStart=state.outcomeStart;state.adminEnd=state.outcomeEnd;return render();},
-  "export-outcomes":()=>{const result=computeOutcomes(state.tasks,state.outcomeStart,state.outcomeEnd);downloadCSV([["起單起日","起單迄日","全部案件","已結案","完成施打","取消施打","進行中","結案完成施打率","結案未施打率"],[state.outcomeStart||"不限",state.outcomeEnd||"不限",result.total,result.closed,result.completed,result.cancelled,result.active,percentLabel(result.completionRate),percentLabel(result.nonPerformedRate)],[],["取消原因","件數","占取消案件","起單至取消中位時間"],...result.reasons.map(r=>[r.reason,r.count,percentLabel(r.percent),durationLabel(r.medianHours)])],"PICC-案件成效.csv");},
+  "outcome-cancelled":()=>{state.view="admin";state.status="cancelled";state.query="";state.page=1;state.adminStart=state.statsStart;state.adminEnd=state.statsEnd;return render();},
+  "export-outcomes":()=>{const result=computeOutcomes(state.tasks,state.statsStart,state.statsEnd);downloadCSV([["起單起日","起單迄日","全部案件","已結案","完成施打","取消施打","進行中","結案完成施打率","結案未施打率"],[state.statsStart||"不限",state.statsEnd||"不限",result.total,result.closed,result.completed,result.cancelled,result.active,percentLabel(result.completionRate),percentLabel(result.nonPerformedRate)],[],["取消原因","件數","占取消案件","起單至取消中位時間"],...result.reasons.map(r=>[r.reason,r.count,percentLabel(r.percent),durationLabel(r.medianHours)])],"PICC-案件成效.csv");},
   "filter-stats":async()=>{const start=$("#statsStart").value,end=$("#statsEnd").value;if(start&&end&&start>end)throw new Error("開始日期不能晚於結束日期");state.statsStart=start;state.statsEnd=end;state.statsScope="all";await render();},
+  "year-stats":async()=>{const year=taipeiDate().slice(0,4);state.statsStart=year+"-01-01";state.statsEnd=year+"-12-31";state.statsScope="all";await render();},
   "all-stats":async()=>{state.statsStart="";state.statsEnd="";state.statsScope="all";await render();},
   "filter-admin":()=>{const start=$("#adminStart").value,end=$("#adminEnd").value;if(start&&end&&start>end)throw new Error("開始日期不能晚於結束日期");state.adminStart=start;state.adminEnd=end;state.page=1;return render();},
   "prev-page":()=>{state.page--;return render();},"next-page":()=>{state.page++;return render();},

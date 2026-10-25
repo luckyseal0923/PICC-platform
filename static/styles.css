@@ -170,12 +170,25 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 .workbench-table .table-actions{align-items:center;gap:5px}
 .workbench-table .table-actions .button{min-height:36px;padding:7px 10px;font-size:12px}
 .workbench-table .age-cell{font-size:13px;color:#687887}
-.statistics-tabs{margin-bottom:24px}.outcome-summary{grid-template-columns:repeat(4,minmax(0,1fr))}
+.metrics-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
+.monthly-panels{display:grid;grid-template-columns:minmax(0,1fr);gap:24px}
+.monthly-panel{min-width:0;width:100%}
+.monthly-chart-scroll{overflow-x:auto;overscroll-behavior-x:contain}
+.monthly-chart{min-width:840px;min-height:250px;gap:16px;padding:26px 8px 12px}
+.monthly-chart .chart-column{min-width:46px;font-size:13px}
+.monthly-chart .chart-column strong{font-size:15px}
+.monthly-chart .chart-bar{width:min(58px,78%);background:#287b66}
+.monthly-chart.created-series .chart-bar{background:#3979b8}
+.monthly-chart .zero-month .chart-bar{height:2px!important;min-height:2px;opacity:.35}
+.monthly-chart .outside-period .chart-bar{visibility:hidden}
+.monthly-chart .outside-period{opacity:.5}
+.chart-caption{margin:10px 0 26px;color:#607585;font-size:12px}
+.timeliness-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}
 .outcome-line{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 0;border-bottom:1px solid #e5ecef;color:#526c7c;font-size:14px}
 .outcome-line strong{color:#1d6555;font-size:18px;white-space:nowrap}
 .outcome-caption{font-size:13px;color:#607585;line-height:1.8;margin:18px 0}
-@media(max-width:1100px){.outcome-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:680px){.outcome-summary{grid-template-columns:1fr}}
+@media(max-width:1100px){.metrics-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.metrics-summary,.timeliness-grid{grid-template-columns:1fr}}
 .duplicate-warning p{margin-top:7px}.duplicate-warning label{display:flex;align-items:start;gap:10px;margin-top:14px;font-size:14px;font-weight:600}
 .duplicate-warning input[type=checkbox]{width:18px;height:18px;min-height:18px;flex-shrink:0;padding:0;margin:3px 0 0;accent-color:var(--teal)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
