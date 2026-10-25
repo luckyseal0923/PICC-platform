@@ -109,6 +109,24 @@ class PiccWorkflows(unittest.TestCase):
             connection.execute("UPDATE tasks SET status='awaiting_report'")
         self.assertTrue(Path(str(legacy)+".before-workflow-v3.sqlite3").exists())
 
+    def test_monthly_numbering_and_csv_preserve_new_status_codes(self):
+        first = self.create(mrn="MONTHLY-ONE")
+        second = self.claim(self.create(mrn="MONTHLY-TWO")).json["task"]
+        self.assertRegex(first["taskId"], r"^PICC-[0-9]{4}-001$")
+        self.assertTrue(second["taskId"].endswith("-002"))
+        content = self.client.get("/api/export").data.decode("utf-8-sig")
+        rows = list(csv.DictReader(io.StringIO(content)))
+        self.assertEqual({row["狀態代碼"] for row in rows}, {"pending", "claimed"})
+        for row in rows:
+            row["任務編號"] += "-COPY"
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+        writer.writeheader();writer.writerows(rows)
+        result = self.client.post("/api/import", data={"file":(io.BytesIO(output.getvalue().encode()),"new.csv")},headers=self.headers)
+        self.assertEqual(result.status_code,200,result.json)
+        copied = [row for row in self.client.get("/api/tasks").json["tasks"] if row["taskId"].endswith("-COPY")]
+        self.assertEqual({row["status"] for row in copied}, {"pending", "claimed"})
+
     def test_anonymous_and_csrf_are_rejected(self):
         anonymous = self.app.test_client()
         self.assertEqual(anonymous.get("/api/tasks").status_code, 401)

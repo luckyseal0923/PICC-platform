@@ -70,6 +70,11 @@ create table if not exists picc_v2_private.requests (
   primary key(actor_id,request_id)
 );
 
+create table if not exists picc_v2_private.case_counters (
+  period text primary key,
+  last_value bigint not null check (last_value>=0)
+);
+alter table picc_v2_private.case_counters enable row level security;
 alter table picc_v2_private.members enable row level security;
 alter table picc_v2_private.tasks enable row level security;
 alter table picc_v2_private.events enable row level security;
@@ -77,6 +82,19 @@ alter table picc_v2_private.requests enable row level security;
 revoke all on all tables in schema picc_v2_private from public, anon, authenticated;
 revoke all on all sequences in schema picc_v2_private from public, anon, authenticated;
 
+create or replace function picc_v2_private.next_case_number(p_stamp timestamptz)
+returns text language plpgsql volatile security definer set search_path='' as $$
+declare period_value text:=to_char(p_stamp at time zone 'Asia/Taipei','YYMM'); existing bigint; sequence_value bigint;
+begin
+  perform pg_advisory_xact_lock(hashtextextended('picc:case-number:'||period_value,0));
+  select coalesce(max(substring(task_id from '[0-9]+$')::bigint),0) into existing
+    from picc_v2_private.tasks where task_id ~ ('^PICC-'||period_value||'-[0-9]{3,}$');
+  insert into picc_v2_private.case_counters(period,last_value) values(period_value,existing+1)
+    on conflict(period) do update set last_value=greatest(picc_v2_private.case_counters.last_value,existing)+1
+    returning last_value into sequence_value;
+  return 'PICC-'||period_value||'-'||lpad(sequence_value::text,greatest(3,length(sequence_value::text)),'0');
+end;
+$$;
 create or replace function picc_v2_private.current_member()
 returns picc_v2_private.members
 language sql stable security definer set search_path=''
@@ -92,10 +110,10 @@ create or replace function picc_v2_private.task_json(t picc_v2_private.tasks)
 returns jsonb language sql stable set search_path='' as $$
   select jsonb_build_object(
     'id',t.id,'taskId',t.task_id,'patientName',t.patient_name,'bedNo',t.bed_no,'mrn',t.mrn,
-    'status',t.status,'statusLabel',case t.status when 'pending' then '待預約' when 'claimed' then '待施打'
-      when 'awaiting_report' then '待回報' when 'completed' then '完成' when 'cancelled' then '已取消' end,
-    'createdAt',t.created_at,'createdBy',t.created_by,'claimedId',t.claimed_id,'claimedBy',t.claimed_by,
-    'claimedAt',t.claimed_at,'operatorId',t.operator_id,'operatorName',t.operator_name,'completedAt',t.completed_at,
+    'status',t.status,'statusLabel',case t.status when 'pending' then '新開案' when 'claimed' then '待預約'
+      when 'awaiting_report' then '施打回報' when 'completed' then '完成' when 'cancelled' then '已取消' end,
+    'createdAt',t.created_at,'createdBy',t.created_by,'claimedId',t.claimed_id,'claimedBy',coalesce((select m.name from picc_v2_private.members m where m.id=t.claimed_id),t.claimed_by),
+    'claimedAt',t.claimed_at,'operatorId',t.operator_id,'operatorName',coalesce((select m.name from picc_v2_private.members m where m.id=t.operator_id),t.operator_name),'completedAt',t.completed_at,
     'difficulty',t.difficulty,'insertionSite',t.insertion_site,'vein',t.vein,'catheterType',t.catheter_type,
     'catheterLength',t.catheter_length,'remark',t.remark,'cancelReason',t.cancel_reason,
     'cancelDetail',t.cancel_detail,'cancelledAt',t.cancelled_at,'deletedAt',t.deleted_at,
@@ -255,13 +273,13 @@ begin
       if original.id is null or original.status<>'cancelled' then raise exception '只有已取消案件可重新起單'; end if;
     end if;
     next_status:=case when coalesce((p_payload->>'selfReport')::boolean,false) then 'completed' else 'pending' end;
-    if original.id is not null and next_status='completed' then raise exception '重新起單請先建立待預約案件'; end if;
+    if original.id is not null and next_status='completed' then raise exception '重新起單請先建立新開案案件'; end if;
     if next_status='completed' then report:=picc_v2_private.report(p_payload); end if;
     new_id:=gen_random_uuid();
     insert into picc_v2_private.tasks(id,task_id,patient_name,bed_no,mrn,status,created_by,
       operator_id,operator_name,completed_at,difficulty,insertion_site,vein,catheter_type,catheter_length,remark,
       claimed_id,claimed_by,claimed_at,source,reorder_of)
-    values(new_id,'PICC-'||to_char(stamp at time zone 'Asia/Taipei','YYYY')||'-'||upper(left(replace(new_id::text,'-',''),12)),
+    values(new_id,picc_v2_private.next_case_number(stamp),
       name_value,bed_value,mrn_value,next_status,actor.id,(report->>'operatorId')::uuid,report->>'operatorName',
       case when report is not null then stamp end,p_payload->>'difficulty',p_payload->>'insertionSite',p_payload->>'vein',
       p_payload->>'catheterType',(report->>'length')::numeric,coalesce(p_payload->>'remark',''),
@@ -279,9 +297,12 @@ begin
       row_no:=row_no+1;
       if nullif(trim(row_data->>'任務編號'),'') is null then raise exception '第 % 列缺少任務編號',row_no; end if;
       if exists(select 1 from picc_v2_private.tasks where task_id=row_data->>'任務編號') then skipped:=skipped+1; continue; end if;
-      next_status:=case row_data->>'Status' when '待預約' then 'pending' when '待施打' then 'claimed' when '待回報' then 'awaiting_report'
-        when '完成' then 'completed' when '已取消' then 'cancelled' end;
-      if next_status is null then raise exception '第 % 列狀態無法辨識',row_no; end if;
+      next_status:=nullif(trim(row_data->>'狀態代碼'),'');
+      if next_status is null then
+        next_status:=case row_data->>'Status' when '待預約' then 'pending' when '待施打' then 'claimed' when '待回報' then 'awaiting_report'
+          when '新開案' then 'pending' when '施打回報' then 'awaiting_report' when '完成' then 'completed' when '已取消' then 'cancelled' end;
+      end if;
+      if next_status is null or next_status not in ('pending','claimed','awaiting_report','completed','cancelled') then raise exception '第 % 列狀態無法辨識',row_no; end if;
       created_time:=picc_v2_private.parse_time(row_data->>'起單時間');
       if created_time is null then raise exception '第 % 列缺少起單時間',row_no; end if;
       completed_time:=picc_v2_private.parse_time(row_data->>'完成時間');
@@ -326,12 +347,12 @@ begin
     if not found then raise exception '此案件已被其他人預約'; end if;
     perform picc_v2_private.audit(t.id,'claimed',actor,jsonb_build_object('operatorName',op.name));
   elsif p_action='tasks.performed' then
-    if t.status<>'claimed' then raise exception '只有待施打案件可以標記待回報'; end if;
+    if t.status<>'claimed' then raise exception '只有待預約案件可以標記施打回報'; end if;
     update picc_v2_private.tasks set status='awaiting_report',updated_at=stamp,version=version+1
       where id=t.id returning * into t;
     perform picc_v2_private.audit(t.id,'awaiting_report',actor,jsonb_build_object('previousStatus','claimed'));
   elsif p_action='tasks.complete' then
-    if t.status not in ('claimed','awaiting_report') then raise exception '只有待施打或待回報案件可以回報完成'; end if;
+    if t.status not in ('claimed','awaiting_report') then raise exception '只有待預約或施打回報案件可以回報完成'; end if;
     report:=picc_v2_private.report(p_payload);
     update picc_v2_private.tasks set status='completed',operator_id=(report->>'operatorId')::uuid,
       operator_name=report->>'operatorName',completed_at=stamp,difficulty=p_payload->>'difficulty',
@@ -340,9 +361,9 @@ begin
       where id=t.id returning * into t;
     perform picc_v2_private.audit(t.id,'completed',actor,jsonb_build_object('operatorName',t.operator_name));
   elsif p_action='tasks.cancel' then
-    if t.status not in ('pending','claimed') then raise exception '只有待預約或待施打案件可以取消'; end if;
+    if t.status not in ('pending','claimed') then raise exception '只有新開案或待預約案件可以取消'; end if;
     reason_value:=p_payload->>'reason'; detail_value:=trim(coalesce(p_payload->>'detail',''));
-    if coalesce(reason_value,'') not in ('暫不需要施打','醫囑調整','病人因素','其他') or (reason_value='其他' and detail_value='') then
+    if coalesce(reason_value,'') not in ('暫不需要施打','醫囑調整','病人因素','等待時間過久','其他') or (reason_value='其他' and detail_value='') then
       raise exception '請選擇取消原因；選其他時請補充說明'; end if;
     update picc_v2_private.tasks set status='cancelled',cancel_reason=reason_value,cancel_detail=detail_value,
       cancelled_at=stamp,updated_at=stamp,version=version+1 where id=t.id returning * into t;
@@ -398,7 +419,7 @@ begin
     raise exception using errcode='42501',message='共用入口只提供建案、預約與回報操作';
   end if;
   if p_action='tasks.list' and coalesce(p_payload->>'status','') not in ('pending','claimed','awaiting_report') then
-    raise exception '請指定待預約或待施打清單'; end if;
+    raise exception '請指定新開案或待預約清單'; end if;
   return picc_v2_private.api_as(shared_actor,p_action,p_payload);
 end;
 $$;

@@ -32,7 +32,7 @@ await test("quotes and HTML remain plain patient data",async()=>{const t=await c
 await test("idempotency prevents repeat creation and rejects changed payload",async()=>{const p={patientName:"DEMO repeat",bedNo:"TEST",mrn:"DEMO-REPEAT",requestId:"repeat-key"};const a=await rpc(A,"tasks.create",p),b=await rpc(A,"tasks.create",p);assert.equal(a.task.id,b.task.id);assert.equal(b.duplicate,true);await rejects(A,"tasks.create",{...p,patientName:"changed"},/識別碼已使用/);});
 await test("only one claim succeeds for the original version",async()=>{const t=await create();await claim(t);await rejects(C,"tasks.claim",{id:t.id,version:t.version,operatorId:C},/其他人更新/);});
 await test("volume belongs to actual performer and normal members see only themselves",async()=>{const t=await complete(await claim(await create()));assert.equal(t.operatorId,C);const stats=await rpc(A,"stats");assert.equal(stats.totalCompleted,1);assert.equal(stats.operators[0].operatorId,C);assert.equal((await rpc(B,"stats",{scope:"all"})).totalCompleted,0);assert.equal((await rpc(C,"stats")).totalCompleted,1);});
-await test("completed tasks cannot be completed or cancelled again",async()=>{const t=await complete(await claim(await create()));await rejects(A,"tasks.complete",{id:t.id,version:t.version,...report},/只有待施打/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"},/只有待預約/);});
+await test("completed tasks cannot be completed or cancelled again",async()=>{const t=await complete(await claim(await create()));await rejects(A,"tasks.complete",{id:t.id,version:t.version,...report},/只有待預約/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"},/只有新開案或待預約/);});
 await test("cancel reason is mandatory and other needs text",async()=>{const t=await create();await rejects(A,"tasks.cancel",{id:t.id,version:t.version},/取消原因/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"其他"},/補充說明/);});
 await test("reorder retains original cancelled row and cancellation history",async()=>{const t=await create();const c=(await rpc(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整",detail:"PG取消測試"})).task;const n=await create({copiedFromTaskId:c.id});assert.equal(n.reorderOf,c.id);assert.notEqual(n.taskId,c.taskId);const old=await rpc(A,"tasks.get",{id:c.id});assert.equal(old.task.status,"cancelled");assert.equal(old.task.cancelReason,"醫囑調整");assert(old.events.some(e=>e.action==="reordered"));assert(old.events.some(e=>e.action==="cancelled"));});
 await test("operators cannot edit, remove, export or change members",async()=>{const t=await create();for(const action of["tasks.edit","tasks.remove","tasks.export","users.save"]){await rejects(B,action,{id:t.id,version:t.version},/限管理者/);}});
@@ -50,7 +50,7 @@ await test("shared creation is audited as shared and retry remains idempotent",a
 await test("shared completion still counts the selected actual performer",async()=>{let t=await entryCreate();t=(await entry("tasks.claim",{id:t.id,version:t.version,operatorId:A})).task;const previous=(await rpc(A,"stats")).totalCompleted;t=(await entry("tasks.complete",{id:t.id,version:t.version,...report})).task;assert.equal(t.operatorId,C);assert.equal((await rpc(A,"stats")).totalCompleted,previous+1);});
 await test("the shared actor cannot be selected as a clinical performer",async()=>{let t=await entryCreate();await assert.rejects(()=>entry("tasks.claim",{id:t.id,version:t.version,operatorId:SHARED}),/有效的預約施打者/);await assert.rejects(()=>entryCreate({...report,operatorId:SHARED,selfReport:true}),/有效的實際施打者/);t=(await entry("tasks.claim",{id:t.id,version:t.version,operatorId:C})).task;await assert.rejects(()=>entry("tasks.complete",{id:t.id,version:t.version,...report,operatorId:SHARED}),/有效的實際施打者/);});
 await test("shared cancellation and reorder preserve the old cancelled record",async()=>{let t=await entryCreate();t=(await entry("tasks.cancel",{id:t.id,version:t.version,reason:"其他",detail:"DEMO shared cancellation"})).task;const next=await entryCreate({copiedFromTaskId:t.id});assert.equal(next.reorderOf,t.id);assert.equal((await entry("tasks.get",{id:t.id})).task.status,"cancelled");});
-await test("shared lists require an explicit pending or claimed status",async()=>{for(const status of ["completed","cancelled",""])await assert.rejects(()=>entry("tasks.list",{status}),/請指定待預約/);const list=await entry("tasks.list",{status:"pending"});assert(list.tasks.every(row=>row.status==='pending'));});
+await test("shared lists require an explicit pending or claimed status",async()=>{for(const status of ["completed","cancelled",""])await assert.rejects(()=>entry("tasks.list",{status}),/請指定新開案/);const list=await entry("tasks.list",{status:"pending"});assert(list.tasks.every(row=>row.status==='pending'));});
 await test("shared entry cannot call administration, statistics, imports or notifications",async()=>{for(const action of ["stats","users.save","tasks.edit","tasks.remove","tasks.export","tasks.import","announce","notifications.list"])await assert.rejects(()=>entry(action,{}),/只提供建案/);});
 await test("anonymous shared access does not grant direct table or private-engine access",async()=>{await assert.rejects(()=>db.transaction(async tx=>{await tx.exec("set local role anon");return tx.query("select * from picc_v2_private.tasks");}),/permission denied/);await assert.rejects(()=>db.transaction(async tx=>{await tx.exec("set local role anon");return tx.query("select picc_v2_private.api_as(null,'stats','{}')");}),/permission denied/);});
 await test("member administration cannot promote or reassign the shared audit actor",async()=>{await rejects(A,"users.save",{id:SHARED,name:"Changed",role:"admin",enabled:true},/共用入口不是施打成員/);});
@@ -66,13 +66,13 @@ await test("disabling the desktop actor closes the full workspace without changi
 await test("awaiting report survives migration, preserves audit and does not count until report completion",async()=>{
   let t=await claim(await create({mrn:"DEMO-AWAITING-V3"}),C);const before=(await rpc(A,"stats")).totalCompleted;
   const stale=t.version;t=(await entry("tasks.performed",{id:t.id,version:t.version})).task;
-  assert.equal(t.status,"awaiting_report");assert.equal(t.statusLabel,"待回報");assert.equal((await rpc(A,"stats")).totalCompleted,before);
+  assert.equal(t.status,"awaiting_report");assert.equal(t.statusLabel,"施打回報");assert.equal((await rpc(A,"stats")).totalCompleted,before);
   await assert.rejects(()=>entry("tasks.performed",{id:t.id,version:stale}),/其他人更新/);
   await db.exec(await readFile(new URL("../supabase/migrations/202610140001_picc_v2.sql",import.meta.url),"utf8"));
   assert.equal((await entry("tasks.get",{id:t.id})).task.status,"awaiting_report");
   assert((await entry("tasks.list",{status:"awaiting_report"})).tasks.some(x=>x.id===t.id));
   assert((await entry("tasks.get",{id:t.id})).events.some(e=>e.action==="awaiting_report"));
-  await assert.rejects(()=>entry("tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"}),/只有待預約/);
+  await assert.rejects(()=>entry("tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"}),/只有新開案或待預約/);
   t=(await entry("tasks.complete",{id:t.id,version:t.version,...report,insertionSite:"左下肢"})).task;
   assert.equal(t.insertionSite,"左下肢");assert.equal((await rpc(A,"stats")).totalCompleted,before+1);
 });
@@ -95,6 +95,39 @@ await test("duplicate check ignores cases older than seven days and removed test
   assert((await entry("tasks.create",{patientName:"DEMO old",bedNo:"TEST",mrn:old.mrn,requestId:"old-v3"})).task);
   const removed=await create({mrn:"DEMO-REMOVED-V3"});await rpc(A,"tasks.remove",{id:removed.id,version:removed.version,reason:"Synthetic cleanup"});
   assert((await entry("tasks.create",{patientName:"DEMO removed",bedNo:"TEST",mrn:removed.mrn,requestId:"removed-v3"})).task);
+});
+await test("monthly case numbers follow Taiwan month boundaries and never truncate after 999",async()=>{
+  const next=async stamp=>(await db.query("select picc_v2_private.next_case_number($1::timestamptz) as number",[stamp])).rows[0].number;
+  assert.equal(await next('2098-12-31T15:59:00Z'),'PICC-9812-001');
+  assert.equal(await next('2098-12-31T16:00:00Z'),'PICC-9901-001');
+  assert.equal(await next('2098-12-31T16:01:00Z'),'PICC-9901-002');
+  await db.query("insert into picc_v2_private.case_counters(period,last_value) values('9802',999)");
+  assert.equal(await next('2098-02-01T00:00:00Z'),'PICC-9802-1000');
+});
+await test("warnings and idempotent retries do not consume a case number; failed transactions roll numbering back",async()=>{
+  const original=await create({mrn:'CASE-COUNTER-RETRY'});
+  const before=(await db.query('select sum(last_value)::int as n from picc_v2_private.case_counters')).rows[0].n;
+  assert.equal((await entry('tasks.create',{patientName:'DEMO warning',bedNo:'TEST',mrn:original.mrn,requestId:'counter-warning'})).requiresDuplicateConfirmation,true);
+  assert.equal((await db.query('select sum(last_value)::int as n from picc_v2_private.case_counters')).rows[0].n,before);
+  const payload={patientName:'DEMO retry',bedNo:'TEST',mrn:'CASE-COUNTER-NEW',requestId:'counter-new'};
+  const first=await entry('tasks.create',payload),second=await entry('tasks.create',payload);assert.equal(first.task.taskId,second.task.taskId);
+  let rolledBackNumber;
+  await assert.rejects(()=>db.transaction(async tx=>{
+    const result=await tx.query("select public.picc_v2_workspace_api('tasks.create',$1::jsonb) as result",[JSON.stringify({patientName:'DEMO rollback',bedNo:'TEST',mrn:'CASE-COUNTER-ROLLBACK',requestId:'counter-rollback'})]);
+    rolledBackNumber=result.rows[0].result.task.taskId;throw new Error('intentional rollback');
+  }),/intentional rollback/);
+  assert.equal((await create({mrn:'CASE-COUNTER-AFTER'})).taskId,rolledBackNumber);
+});
+await test("new CSV state codes and legacy labels retain distinct booking meanings",async()=>{
+  const base={"起單時間":"2026/10/01 10:00","病人姓名":"DEMO import","床號":"TEST","病歷號":"CSV-V4","Status":"待預約"};
+  await workspace('tasks.import',{rows:[{...base,"任務編號":"CSV-V4-OLD"},{...base,"任務編號":"CSV-V4-NEW","狀態代碼":"claimed"}]});
+  const rows=(await workspace('tasks.list',{q:'CSV-V4'})).tasks;
+  assert.equal(rows.find(t=>t.taskId==='CSV-V4-OLD').status,'pending');
+  assert.equal(rows.find(t=>t.taskId==='CSV-V4-NEW').status,'claimed');
+  await assert.rejects(()=>workspace('tasks.import',{rows:[{...base,"任務編號":"CSV-V4-BAD","狀態代碼":"invalid"}]}),/狀態無法辨識/);
+});
+await test("anonymous users cannot consume the private monthly counter",async()=>{
+  await assert.rejects(()=>db.transaction(async tx=>{await tx.exec('set local role anon');return tx.query('select picc_v2_private.next_case_number(now())');}),/permission denied/);
 });
 console.log("Supabase SQL:",results.length,"passed");
 }catch(error){process.exitCode=1;console.error(error.stack);}

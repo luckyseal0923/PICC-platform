@@ -26,12 +26,12 @@ if (ROOT / ".vendor").exists():
 from flask import Flask, g, jsonify, make_response, request, session, send_from_directory
 
 TAIPEI = timezone(timedelta(hours=8))
-STATUSES = {"pending": "待預約", "claimed": "待施打", "awaiting_report": "待回報", "completed": "完成", "cancelled": "已取消"}
+STATUSES = {"pending": "新開案", "claimed": "待預約", "awaiting_report": "施打回報", "completed": "完成", "cancelled": "已取消"}
 DIFFICULTIES = ["非常簡單", "簡單", "中等", "困難", "非常困難"]
 SITES = ["右上臂", "左上臂", "左下肢", "右下肢", "其他"]
 VEINS = ["Basilic", "Cephalic", "Brachial"]
 CATHETERS = ["雙腔PICC", "單腔PICC"]
-CANCEL_REASONS = ["暫不需要施打", "醫囑調整", "病人因素", "其他"]
+CANCEL_REASONS = ["暫不需要施打", "醫囑調整", "病人因素", "等待時間過久", "其他"]
 SHARED_ENTRY_ID = "00000000-0000-4000-8000-000000000001"
 SHARED_ENTRY_NAME = "內部共用入口（未驗證操作者）"
 SHARED_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002"
@@ -127,6 +127,7 @@ def create_app(config=None):
         CREATE INDEX IF NOT EXISTS task_status ON tasks(status,deleted_at);
         CREATE INDEX IF NOT EXISTS task_mrn ON tasks(mrn);
         CREATE INDEX IF NOT EXISTS task_completion ON tasks(completed_at,operator_id);
+        CREATE TABLE IF NOT EXISTS case_counters(period TEXT PRIMARY KEY,last_value INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS events(
           id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT REFERENCES tasks(id),
           action TEXT NOT NULL, actor_id TEXT NOT NULL, actor_name TEXT NOT NULL,
@@ -416,6 +417,10 @@ def create_app(config=None):
                    "updated_at": "updatedAt", "deleted_at": "deletedAt", "reorder_of": "reorderOf"}
         result = {mapping.get(k, k): row[k] for k in row.keys()}
         result["statusLabel"] = STATUSES[row["status"]]
+        for id_key, name_key in (("claimed_id","claimedBy"),("operator_id","operatorName")):
+            member = db().execute("SELECT name FROM users WHERE id=?", (row[id_key],)).fetchone() if row[id_key] else None
+            if member:
+                result[name_key] = member[0]
         result["hasDifficultHistory"] = bool(db().execute(
             "SELECT 1 FROM tasks WHERE TRIM(mrn)=TRIM(?) AND status='completed' "
             "AND difficulty IN ('困難','非常困難') AND deleted_at IS NULL LIMIT 1", (row["mrn"],)).fetchone())
@@ -469,7 +474,7 @@ def create_app(config=None):
     @app.get("/api/entry/tasks")
     def tasks():
         if request.path.startswith("/api/entry/") and request.args.get("status") not in ("pending", "claimed", "awaiting_report"):
-            raise ApiError("請指定待預約或待施打清單", 400)
+            raise ApiError("請指定新開案或待預約清單", 400)
         clauses, values = ["deleted_at IS NULL"], []
         if request.args.get("status") in STATUSES:
             clauses.append("status=?"); values.append(request.args["status"])
@@ -495,6 +500,16 @@ def create_app(config=None):
         return jsonify(task=task_json(task_row(task_id)), events=[
             {"action": e["action"], "actorName": e["actor_name"], "occurredAt": e["occurred_at"],
              "detail": json.loads(e["detail"])} for e in events])
+
+    def next_case_number(timestamp):
+        period = datetime.fromisoformat(timestamp).astimezone(TAIPEI).strftime("%y%m")
+        prefix = "PICC-" + period + "-"
+        numbers = [int(row[0][len(prefix):]) for row in db().execute("SELECT task_id FROM tasks WHERE task_id LIKE ?", (prefix+"%",))
+                   if re.fullmatch(re.escape(prefix)+r"[0-9]{3,}", row[0])]
+        counter = db().execute("SELECT last_value FROM case_counters WHERE period=?", (period,)).fetchone()
+        value = max(max(numbers, default=0), counter[0] if counter else 0) + 1
+        db().execute("INSERT INTO case_counters(period,last_value) VALUES(?,?) ON CONFLICT(period) DO UPDATE SET last_value=excluded.last_value", (period,value))
+        return prefix + str(value).zfill(3)
 
     @app.post("/api/tasks")
     @app.post("/api/entry/tasks")
@@ -523,11 +538,11 @@ def create_app(config=None):
             if original["status"] != "cancelled":
                 raise ApiError("只有已取消案件可重新起單", 409)
             if is_self:
-                raise ApiError("重新起單請先建立待預約案件")
+                raise ApiError("重新起單請先建立新開案案件")
         report = report_values(data) if is_self else None
         task_id = str(uuid.uuid4())
-        task_number = "PICC-" + datetime.now(TAIPEI).strftime("%Y") + "-" + uuid.uuid4().hex[:8].upper()
         timestamp = now()
+        task_number = next_case_number(timestamp)
         db().execute("INSERT INTO tasks(id,task_id,patient_name,bed_no,mrn,status,created_at,created_by,updated_at,remark)"
                      " VALUES(?,?,?,?,?,?,?,?,?,?)",
                      (task_id, task_number, name, bed, mrn, "completed" if is_self else "pending",
@@ -573,7 +588,7 @@ def create_app(config=None):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
         if row["status"] != "claimed":
-            raise ApiError("只有待施打案件可以標記待回報", 409)
+            raise ApiError("只有待預約案件可以標記施打回報", 409)
         db().execute("UPDATE tasks SET status='awaiting_report',updated_at=?,version=version+1 WHERE id=?", (now(), task_id))
         audit(task_id, "awaiting_report", u, {"previousStatus": "claimed"})
         return jsonify(ok=True, task=task_json(task_row(task_id)))
@@ -585,7 +600,7 @@ def create_app(config=None):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
         if row["status"] not in ("claimed", "awaiting_report"):
-            raise ApiError("只有待施打或待回報案件可以回報完成", 409)
+            raise ApiError("只有待預約或施打回報案件可以回報完成", 409)
         report = report_values(data)
         db().execute("UPDATE tasks SET status='completed',operator_id=?,operator_name=?,completed_at=?,difficulty=?,"
                      "insertion_site=?,vein=?,catheter_type=?,catheter_length=?,remark=?,updated_at=?,"
@@ -602,7 +617,7 @@ def create_app(config=None):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
         if row["status"] not in ("pending", "claimed"):
-            raise ApiError("只有待預約或待施打案件可以取消", 409)
+            raise ApiError("只有新開案或待預約案件可以取消", 409)
         reason = data.get("reason")
         detail_text = text(data.get("detail"))
         if reason not in CANCEL_REASONS or (reason == "其他" and not detail_text):
@@ -729,12 +744,13 @@ def create_app(config=None):
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["起單時間", "任務編號", "病人姓名", "床號", "病歷號", "Status", "接單者", "施打者",
-                         "管路種類", "管路長度(cm)", "部位", "血管", "困難度", "備註", "完成時間", "取消時間", "取消原因", "取消說明"])
+                         "管路種類", "管路長度(cm)", "部位", "血管", "困難度", "備註", "完成時間", "取消時間", "取消原因", "取消說明", "狀態代碼"])
         keys = ["created_at", "task_id", "patient_name", "bed_no", "mrn", "status", "claimed_by", "operator_name",
                 "catheter_type", "catheter_length", "insertion_site", "vein", "difficulty", "remark",
                 "completed_at", "cancelled_at", "cancel_reason", "cancel_detail"]
         for row in rows:
-            writer.writerow([csv_safe(STATUSES[row[k]] if k == "status" else row[k]) for k in keys])
+            current = task_json(row)
+            writer.writerow([csv_safe(STATUSES[row[k]] if k == "status" else current["claimedBy"] if k == "claimed_by" else current["operatorName"] if k == "operator_name" else row[k]) for k in keys] + [row["status"]])
         return app.response_class("\ufeff" + output.getvalue(), mimetype="text/csv",
                                   headers={"Content-Disposition": 'attachment; filename="PICC-tasks.csv"'})
 
@@ -759,7 +775,11 @@ def create_app(config=None):
                 raise ApiError(f"第 {number} 列缺少任務編號")
             if db().execute("SELECT 1 FROM tasks WHERE task_id=?", (number_id,)).fetchone():
                 skipped += 1; continue
-            status = {v: k for k, v in STATUSES.items()}.get(raw.get("Status"))
+            status = text(raw.get("狀態代碼"))
+            if not status:
+                status = {"待預約":"pending", "待施打":"claimed", "待回報":"awaiting_report", "新開案":"pending", "施打回報":"awaiting_report", "完成":"completed", "已取消":"cancelled"}.get(raw.get("Status"))
+            if status not in STATUSES:
+                status = None
             if not status:
                 raise ApiError(f"第 {number} 列狀態無法辨識")
             name, bed, mrn = (text(raw.get(k)) for k in ("病人姓名", "床號", "病歷號"))

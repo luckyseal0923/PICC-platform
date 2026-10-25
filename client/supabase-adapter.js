@@ -1,7 +1,7 @@
 import {createClient} from "@supabase/supabase-js";
 
 export const enums={
-  cancelReasons:["暫不需要施打","醫囑調整","病人因素","其他"],
+  cancelReasons:["暫不需要施打","醫囑調整","病人因素","等待時間過久","其他"],
   difficulties:["非常簡單","簡單","中等","困難","非常困難"],
   sites:["右上臂","左上臂","左下肢","右下肢","其他"],veins:["Basilic","Cephalic","Brachial"],catheters:["雙腔PICC","單腔PICC"]
 };

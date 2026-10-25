@@ -153,6 +153,27 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 }
 .status.awaiting_report{background:#f0eafa;color:#67448e}
 .active-workbench .empty{min-height:340px}
+.status-filter{display:flex;align-items:center;gap:11px}
+.status-filter label{font-size:13px;font-weight:600;color:#405a6a;white-space:nowrap}
+.status-filter select{min-width:190px;min-height:42px;padding:8px 33px 8px 12px;border:1px solid #a8b8c3;border-radius:9px;background:#fff;color:#183b45;font-size:14px;font-weight:600}
+.workbench-table{min-width:940px;font-size:14px}
+.workbench-table th{padding:14px 13px;font-size:12px}
+.workbench-table td{padding:17px 13px;white-space:nowrap}
+.workbench-table .case-number{font-size:12px;font-weight:600;color:#426879;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.workbench-table .patient-cell strong{font-size:15px}
+.workbench-table .patient-cell .difficult{display:block;margin-top:5px;font-size:11px}
+.workbench-table .mrn-cell{font-variant-numeric:tabular-nums;letter-spacing:.4px;color:#344f61}
+.workbench-table .assignee-cell strong{display:inline-block;padding:5px 9px;border:1px solid #cde1d9;border-radius:7px;background:#edf6f1;color:#176653;font-size:14px;font-weight:650}
+.workbench-table .assignee-cell.unassigned strong{background:#f3f5f7;border-color:#e0e7eb;color:#687d8a;font-size:13px;font-weight:400}
+.workbench-table .table-actions{align-items:center;gap:5px}
+.workbench-table .table-actions .button{min-height:36px;padding:7px 10px;font-size:12px}
+.workbench-table .age-cell{font-size:13px;color:#687887}
+.statistics-tabs{margin-bottom:24px}.outcome-summary{grid-template-columns:repeat(4,minmax(0,1fr))}
+.outcome-line{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 0;border-bottom:1px solid #e5ecef;color:#526c7c;font-size:14px}
+.outcome-line strong{color:#1d6555;font-size:18px;white-space:nowrap}
+.outcome-caption{font-size:13px;color:#607585;line-height:1.8;margin:18px 0}
+@media(max-width:1100px){.outcome-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.status-filter{width:100%}.status-filter select{flex:1;min-width:0;font-size:16px}.outcome-summary{grid-template-columns:1fr}}
 .duplicate-warning p{margin-top:7px}.duplicate-warning label{display:flex;align-items:start;gap:10px;margin-top:14px;font-size:14px;font-weight:600}
 .duplicate-warning input[type=checkbox]{width:18px;height:18px;min-height:18px;flex-shrink:0;padding:0;margin:3px 0 0;accent-color:var(--teal)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
