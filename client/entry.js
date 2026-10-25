@@ -70,7 +70,7 @@ function taskCard(task){
     (task.remark?'<p class="help">備註：'+escape(task.remark)+'</p>':"")+
     (booking?'<form data-form="claim" data-id="'+escape(task.id)+'"><label for="operator-'+escape(task.id)+'">施打人</label><select id="operator-'+escape(task.id)+'" name="operatorId" required>'+memberOptions()+'</select><button type="submit" class="button primary">預約施打</button></form>':
       '<div class="case-actions"><button type="button" class="button primary" data-action="complete" data-id="'+escape(task.id)+'">施打回報</button></div>')+
-    (task.status!=="awaiting_report"?'<div class="case-cancel"><button type="button" class="quiet-button" data-action="cancel" data-id="'+escape(task.id)+'">取消施打</button></div>':"")+'</article>';
+    '<div class="case-cancel"><button type="button" class="quiet-button" data-action="cancel" data-id="'+escape(task.id)+'">取消施打</button></div></article>';
 }
 function renderList(){
   $("#entryContent").innerHTML='<div class="toolbar"><span>'+state.tasks.length+' 筆'+(page==="booking"?'新開案':'待預約／待施打回報')+'案件</span><button type="button" class="quiet-button" data-action="refresh">重新整理</button></div>'+

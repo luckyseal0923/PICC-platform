@@ -361,7 +361,7 @@ begin
       where id=t.id returning * into t;
     perform picc_v2_private.audit(t.id,'completed',actor,jsonb_build_object('operatorName',t.operator_name));
   elsif p_action='tasks.cancel' then
-    if t.status not in ('pending','claimed') then raise exception '只有新開案或待預約案件可以取消'; end if;
+    if t.status not in ('pending','claimed','awaiting_report') then raise exception '只有進行中的案件可以取消'; end if;
     reason_value:=p_payload->>'reason'; detail_value:=trim(coalesce(p_payload->>'detail',''));
     if coalesce(reason_value,'') not in ('暫不需要施打','醫囑調整','病人因素','等待時間過久','其他') or (reason_value='其他' and detail_value='') then
       raise exception '請選擇取消原因；選其他時請補充說明'; end if;

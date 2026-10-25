@@ -113,7 +113,7 @@ function showComplete(id) {
 }
 function showCancel(id) {
   const t=findTask(id); state.detail=t;
-  modal("取消施打",t.taskId,patientInfo(t)+'<div class="alert section-spacer">取消後會保留案件與原因，並從新開案／待預約清單移出。取消案件不計入完成施打量。</div>'+
+  modal("取消施打",t.taskId,patientInfo(t)+'<div class="alert section-spacer">取消後會保留案件與原因，並從進行中案件移出。取消案件不計入完成施打量。</div>'+
   '<form data-form="cancel" data-id="'+esc(id)+'"><div class="field"><label for="f-reason">取消原因 <b>＊</b></label><select id="f-reason" name="reason" required>'+options(state.config.cancelReasons)+'</select></div><div class="field section-spacer"><label for="f-detail">補充說明</label><textarea id="f-detail" name="detail" maxlength="1000" placeholder="選擇「其他」時請填寫說明"></textarea></div>'+formActions("確認取消施打","warning")+'</form>');
 }
 function showReorder(id) {
@@ -144,7 +144,7 @@ function taskButtons(t,detail=false) {
   let html="";
   if(t.status==="pending") html+='<button class="button '+(detail?"primary":"secondary")+'" data-action="claim" data-id="'+esc(t.id)+'">預約施打</button>';
   if(["claimed","awaiting_report"].includes(t.status)) html+='<button class="button primary" data-action="complete" data-id="'+esc(t.id)+'">'+icon("check")+'施打回報</button>';
-  if(["pending","claimed"].includes(t.status)) html+='<button class="button '+(detail?"warning":"text-button")+'" data-action="cancel" data-id="'+esc(t.id)+'">取消</button>';
+  if(activeStatuses.includes(t.status)) html+='<button class="button '+(detail?"warning":"text-button")+'" data-action="cancel" data-id="'+esc(t.id)+'">取消施打</button>';
   if(t.status==="cancelled") html+='<button class="button secondary" data-action="reorder" data-id="'+esc(t.id)+'">重新起單</button>';
   return html;
 }

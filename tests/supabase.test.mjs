@@ -32,7 +32,7 @@ await test("quotes and HTML remain plain patient data",async()=>{const t=await c
 await test("idempotency prevents repeat creation and rejects changed payload",async()=>{const p={patientName:"DEMO repeat",bedNo:"TEST",mrn:"DEMO-REPEAT",requestId:"repeat-key"};const a=await rpc(A,"tasks.create",p),b=await rpc(A,"tasks.create",p);assert.equal(a.task.id,b.task.id);assert.equal(b.duplicate,true);await rejects(A,"tasks.create",{...p,patientName:"changed"},/識別碼已使用/);});
 await test("only one claim succeeds for the original version",async()=>{const t=await create();await claim(t);await rejects(C,"tasks.claim",{id:t.id,version:t.version,operatorId:C},/其他人更新/);});
 await test("volume belongs to actual performer and normal members see only themselves",async()=>{const t=await complete(await claim(await create()));assert.equal(t.operatorId,C);const stats=await rpc(A,"stats");assert.equal(stats.totalCompleted,1);assert.equal(stats.operators[0].operatorId,C);assert.equal((await rpc(B,"stats",{scope:"all"})).totalCompleted,0);assert.equal((await rpc(C,"stats")).totalCompleted,1);});
-await test("completed tasks cannot be completed or cancelled again",async()=>{const t=await complete(await claim(await create()));await rejects(A,"tasks.complete",{id:t.id,version:t.version,...report},/只有待預約/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"},/只有新開案或待預約/);});
+await test("completed tasks cannot be completed or cancelled again",async()=>{const t=await complete(await claim(await create()));await rejects(A,"tasks.complete",{id:t.id,version:t.version,...report},/只有待預約/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"},/只有進行中/);});
 await test("cancel reason is mandatory and other needs text",async()=>{const t=await create();await rejects(A,"tasks.cancel",{id:t.id,version:t.version},/取消原因/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"其他"},/補充說明/);});
 await test("reorder retains original cancelled row and cancellation history",async()=>{const t=await create();const c=(await rpc(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整",detail:"PG取消測試"})).task;const n=await create({copiedFromTaskId:c.id});assert.equal(n.reorderOf,c.id);assert.notEqual(n.taskId,c.taskId);const old=await rpc(A,"tasks.get",{id:c.id});assert.equal(old.task.status,"cancelled");assert.equal(old.task.cancelReason,"醫囑調整");assert(old.events.some(e=>e.action==="reordered"));assert(old.events.some(e=>e.action==="cancelled"));});
 await test("operators cannot edit, remove, export or change members",async()=>{const t=await create();for(const action of["tasks.edit","tasks.remove","tasks.export","users.save"]){await rejects(B,action,{id:t.id,version:t.version},/限管理者/);}});
@@ -72,7 +72,7 @@ await test("awaiting report survives migration, preserves audit and does not cou
   assert.equal((await entry("tasks.get",{id:t.id})).task.status,"awaiting_report");
   assert((await entry("tasks.list",{status:"awaiting_report"})).tasks.some(x=>x.id===t.id));
   assert((await entry("tasks.get",{id:t.id})).events.some(e=>e.action==="awaiting_report"));
-  await assert.rejects(()=>entry("tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"}),/只有新開案或待預約/);
+  await assert.rejects(()=>entry("tasks.cancel",{id:t.id,version:t.version,reason:"其他"}),/補充說明/);
   t=(await entry("tasks.complete",{id:t.id,version:t.version,...report,insertionSite:"左下肢"})).task;
   assert.equal(t.insertionSite,"左下肢");assert.equal((await rpc(A,"stats")).totalCompleted,before+1);
 });

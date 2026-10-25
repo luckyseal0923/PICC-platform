@@ -616,8 +616,8 @@ def create_app(config=None):
     def cancel(task_id):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
-        if row["status"] not in ("pending", "claimed"):
-            raise ApiError("只有新開案或待預約案件可以取消", 409)
+        if row["status"] not in ("pending", "claimed", "awaiting_report"):
+            raise ApiError("只有進行中的案件可以取消", 409)
         reason = data.get("reason")
         detail_text = text(data.get("detail"))
         if reason not in CANCEL_REASONS or (reason == "其他" and not detail_text):
