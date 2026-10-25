@@ -26,7 +26,7 @@ if (ROOT / ".vendor").exists():
 from flask import Flask, g, jsonify, make_response, request, session, send_from_directory
 
 TAIPEI = timezone(timedelta(hours=8))
-STATUSES = {"pending": "新開案", "claimed": "待施打", "awaiting_report": "待施打", "completed": "完成", "cancelled": "已取消"}
+STATUSES = {"pending": "新開案", "claimed": "等候施打", "awaiting_report": "等候施打", "completed": "完成", "cancelled": "已取消"}
 DIFFICULTIES = ["非常簡單", "簡單", "中等", "困難", "非常困難"]
 SITES = ["右上臂", "左上臂", "左下肢", "右下肢", "其他"]
 VEINS = ["Basilic", "Cephalic", "Brachial"]
@@ -199,7 +199,7 @@ def create_app(config=None):
                 previous = db().execute("SELECT id FROM tasks WHERE status='awaiting_report' AND deleted_at IS NULL").fetchall()
                 for row in previous:
                     db().execute("UPDATE tasks SET status='claimed',version=version+1,updated_at=? WHERE id=?", (now(),row["id"]))
-                    db().execute("INSERT INTO events(task_id,action,actor_id,actor_name,occurred_at,detail) VALUES(?,?,?,?,?,?)",(row["id"],"workflow_merged",SHARED_WORKSPACE_ID,actor["name"],now(),json.dumps({"previousStatus":"awaiting_report","status":"claimed","reason":"進行中流程整併為新開案與待施打"},ensure_ascii=False)))
+                    db().execute("INSERT INTO events(task_id,action,actor_id,actor_name,occurred_at,detail) VALUES(?,?,?,?,?,?)",(row["id"],"workflow_merged",SHARED_WORKSPACE_ID,actor["name"],now(),json.dumps({"previousStatus":"awaiting_report","status":"claimed","reason":"進行中流程整併為新開案與等候施打"},ensure_ascii=False)))
                 db().execute("COMMIT")
             except Exception:
                 db().execute("ROLLBACK")
@@ -489,7 +489,7 @@ def create_app(config=None):
     @app.get("/api/entry/tasks")
     def tasks():
         if request.path.startswith("/api/entry/") and request.args.get("status") not in ("pending", "claimed", "awaiting_report"):
-            raise ApiError("請指定新開案或待施打清單", 400)
+            raise ApiError("請指定新開案或等候施打清單", 400)
         clauses, values = ["deleted_at IS NULL"], []
         if request.args.get("status") in STATUSES:
             clauses.append("status=?"); values.append(request.args["status"])
@@ -609,7 +609,7 @@ def create_app(config=None):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
         if row["status"] not in ("claimed", "awaiting_report"):
-            raise ApiError("只有待施打案件可以回報完成", 409)
+            raise ApiError("只有等候施打案件可以回報完成", 409)
         report = report_values(data)
         db().execute("UPDATE tasks SET status='completed',operator_id=?,operator_name=?,completed_at=?,difficulty=?,"
                      "insertion_site=?,vein=?,catheter_type=?,catheter_length=?,remark=?,updated_at=?,"
@@ -786,7 +786,7 @@ def create_app(config=None):
                 skipped += 1; continue
             status = text(raw.get("狀態代碼"))
             if not status:
-                status = {"待預約":"pending", "待施打":"claimed", "待回報":"awaiting_report", "新開案":"pending", "施打回報":"awaiting_report", "待施打回報":"awaiting_report", "完成":"completed", "已取消":"cancelled"}.get(raw.get("Status"))
+                status = {"待預約":"pending", "待施打":"claimed", "等候施打":"claimed", "待回報":"awaiting_report", "新開案":"pending", "施打回報":"awaiting_report", "待施打回報":"awaiting_report", "完成":"completed", "已取消":"cancelled"}.get(raw.get("Status"))
             if status == "awaiting_report":
                 status = "claimed"
             if status not in STATUSES:

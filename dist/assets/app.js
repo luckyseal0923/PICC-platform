@@ -28,9 +28,9 @@ function decorate(root = document) {
   root.querySelectorAll("[data-bottom]").forEach(el => {el.style.bottom = Math.max(0, Math.min(100, +el.dataset.bottom))+"%";});
   root.querySelectorAll("[data-chart-width]").forEach(el => {el.style.minWidth = Math.max(840, +el.dataset.chartWidth)+"px";});
 }
-const labels = {active:"所有案件",pending:"新開案",claimed:"待施打",awaiting_report:"待施打",completed:"完成",cancelled:"已取消"};
+const labels = {active:"所有案件",pending:"新開案",claimed:"等候施打",awaiting_report:"等候施打",completed:"完成",cancelled:"已取消"};
 const activeStatuses=["pending","claimed"];
-const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_report:"曾標記待回報",workflow_merged:"流程調整：併入待施打",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"待施打公告",announce_pending:"待施打公告"};
+const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_report:"曾標記待回報",workflow_merged:"流程調整：併入等候施打",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"等候施打公告",announce_pending:"等候施打公告"};
 const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",requestId:"",detail:null};
 const dateFormatter = new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
 function fmt(value) { if (!value) return "未記錄"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "未記錄" : dateFormatter.format(d); }
@@ -163,7 +163,7 @@ function statusTabs() {
 }
 function searchBox(){return '<div class="search-wrap">'+icon("search")+'<input id="taskSearch" placeholder="姓名、床號或病歷號" aria-label="搜尋案件" value="'+esc(state.query)+'"></div>';}
 function metrics() {
-  const entries=[["pending","新開案","等待團隊安排","clock"],["claimed","待施打","已由團隊成員接單","user"],["completed","已完成","已完成施打回報","check"],["cancelled","已取消","保留取消原因與紀錄","close"]];
+  const entries=[["pending","新開案","等待團隊安排","clock"],["claimed","等候施打","已由團隊成員接單","user"],["completed","已完成","已完成施打回報","check"],["cancelled","已取消","保留取消原因與紀錄","close"]];
   return '<div class="metrics">'+entries.map(([s,label,hint,i])=>'<button class="metric" data-status="'+s+'" aria-pressed="'+(state.status===s)+'"><div class="metric-head">'+label+'<span class="metric-icon">'+icon(i)+'</span></div><div class="metric-number">'+memberTasks().filter(t=>t.status===s).length+'</div><small>'+hint+'</small></button>').join("")+'</div>';
 }
 function renderBoard() {
@@ -244,11 +244,11 @@ function renderMembers() {
 }
 async function renderNotifications() {
   const data=await api("/api/notifications");
-  if(data.deferred||state.config.notificationsEnabled===false)return '<div class="alert info-alert">LINE 群組通知會在下一階段啟用，目前先完成案件與統計功能。</div><section class="panel"><div class="panel-head"><h2>LINE 通知（待串接）</h2><button class="button secondary small-button" data-action="announce">預覽待施打清單</button></div>'+empty("LINE 通知尚未啟用","可先預覽待施打清單，案件操作不會發送訊息。")+'</section>';
+  if(data.deferred||state.config.notificationsEnabled===false)return '<div class="alert info-alert">LINE 群組通知會在下一階段啟用，目前先完成案件與統計功能。</div><section class="panel"><div class="panel-head"><h2>LINE 通知（待串接）</h2><button class="button secondary small-button" data-action="announce">預覽等候施打清單</button></div>'+empty("LINE 通知尚未啟用","可先預覽等候施打清單，案件操作不會發送訊息。")+'</section>';
   const status={simulated:"示範紀錄（未發送）",queued:"待發送",sent:"服務確認送出",failed:"發送未完成",sending:"發送中"};
-  return '<div class="alert info-alert">案件寫入與通知結果分開記錄。通知未完成時可重試，無需重複建立或回報案件。</div><section class="panel"><div class="panel-head"><h2>LINE 通知紀錄</h2><button class="button secondary small-button" data-action="announce">預覽待施打公告</button></div><div class="table-scroll"><table><thead><tr><th>時間</th><th>通知事件</th><th>操作人</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+data.notifications.map(n=>'<tr><td>'+fmt(n.created_at)+'</td><td>'+esc(eventLabels[n.event]||n.event)+'</td><td>'+esc(n.actor_name)+'</td><td>'+esc(status[n.status]||n.status)+(n.last_error?'<small>'+esc(n.last_error)+'</small>':"")+'</td><td>'+((n.status==="queued"||n.status==="failed")?'<button class="button secondary small-button" data-action="retry" data-id="'+n.id+'">重試通知</button>':"—")+'</td></tr>').join("")+'</tbody></table>'+(data.notifications.length?"":empty("還沒有通知紀錄","新增或更新案件後會顯示於此。"))+'</div></section>';
+  return '<div class="alert info-alert">案件寫入與通知結果分開記錄。通知未完成時可重試，無需重複建立或回報案件。</div><section class="panel"><div class="panel-head"><h2>LINE 通知紀錄</h2><button class="button secondary small-button" data-action="announce">預覽等候施打公告</button></div><div class="table-scroll"><table><thead><tr><th>時間</th><th>通知事件</th><th>操作人</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+data.notifications.map(n=>'<tr><td>'+fmt(n.created_at)+'</td><td>'+esc(eventLabels[n.event]||n.event)+'</td><td>'+esc(n.actor_name)+'</td><td>'+esc(status[n.status]||n.status)+(n.last_error?'<small>'+esc(n.last_error)+'</small>':"")+'</td><td>'+((n.status==="queued"||n.status==="failed")?'<button class="button secondary small-button" data-action="retry" data-id="'+n.id+'">重試通知</button>':"—")+'</td></tr>').join("")+'</tbody></table>'+(data.notifications.length?"":empty("還沒有通知紀錄","新增或更新案件後會顯示於此。"))+'</div></section>';
 }
-const viewInfo={board:["TEAM WORKSPACE","工作台","聚焦新開案與待施打；完成後可至案件管理查閱。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PERFORMANCE INDICATORS","成效指標","整合施打量、案件完成比例、取消原因與處理時效。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
+const viewInfo={board:["TEAM WORKSPACE","工作台","聚焦新開案與等候施打；完成後可至案件管理查閱。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PERFORMANCE INDICATORS","成效指標","整合施打量、案件完成比例、取消原因與處理時效。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
 let renderVersion=0;
 async function render() {
   const version=++renderVersion, info=viewInfo[state.view];
@@ -339,7 +339,7 @@ function outcomeExportRows(tasks){
   add("起單案件數",result.total,result.total,"",result.total+" 筆案件","起單日期在查詢期間，且未移除",cohort);
   add("已完成施打案件",result.completed,result.completed,"",result.completed+" 筆完成案件","本期起單，狀態為完成；不等同完成日期在本期的施打量",completed);
   add("已取消施打案件",result.cancelled,result.cancelled,"",result.cancelled+" 筆取消案件","本期起單，狀態為已取消",cancelled);
-  add("仍在進行",result.active,result.active,"",result.active+" 筆進行中案件","新開案、已接單等待施打、已施打等待回報；不算未施打",active);
+  add("仍在進行",result.active,result.active,"",result.active+" 筆進行中案件","新開案、已接單等等候施打、已施打等待回報；不算未施打",active);
   add("已結案案件",result.closed,result.closed,"",result.completed+" + "+result.cancelled+" = "+result.closed,"完成＋取消；進行中不納入分母",closed);
   const rate=(metric,value,numerator,denominator,condition,source)=>add(metric,percentLabel(value),numerator,denominator,denominator?numerator+" ÷ "+denominator+" × 100 = "+percentLabel(value):"分母為 0，不計算比例",condition,source);
   rate("結案完成施打率",result.completionRate,result.completed,result.closed,"完成 ÷（完成＋取消）",closed);
@@ -355,8 +355,8 @@ function showImport() {
 }
 function showAnnouncement() {
   const tasks=state.tasks.filter(t=>t.status==="claimed");
-  modal("待施打清單公告","本階段僅預覽內容，LINE 通知於後續串接。",'<div class="alert">LINE 通知尚未啟用，目前不會發送訊息。</div>'+
-  (tasks.length?'<div class="task-list">'+tasks.map(t=>'<div class="task-card"><div class="task-copy"><strong>'+esc(t.patientName)+'</strong><div class="patient-meta">床號 '+esc(t.bedNo)+' · 接單者 '+esc(t.claimedBy)+'</div></div><span class="wait">等待 '+waiting(t)+'</span></div>').join("")+'</div>':empty("目前沒有待施打案件"))+'<div class="form-actions"><button class="button secondary" data-action="close">關閉預覽</button></div>');
+  modal("等候施打清單公告","本階段僅預覽內容，LINE 通知於後續串接。",'<div class="alert">LINE 通知尚未啟用，目前不會發送訊息。</div>'+
+  (tasks.length?'<div class="task-list">'+tasks.map(t=>'<div class="task-card"><div class="task-copy"><strong>'+esc(t.patientName)+'</strong><div class="patient-meta">床號 '+esc(t.bedNo)+' · 接單者 '+esc(t.claimedBy)+'</div></div><span class="wait">等待 '+waiting(t)+'</span></div>').join("")+'</div>':empty("目前沒有等候施打案件"))+'<div class="form-actions"><button class="button secondary" data-action="close">關閉預覽</button></div>');
 }
 const actions={
   close:()=>$("#dialog").close(),"create-normal":()=>showCreate(false),"create-self":()=>showCreate(true),
@@ -401,7 +401,7 @@ document.addEventListener("submit",async e=>{
     else if(type==="member") {values.id=id;values.enabled=values.enabled==="true";await api("/api/users",{method:"POST",body:values});message="已更新團隊成員";}
     else if(type==="import") {const result=await api("/api/import",{method:"POST",body:new FormData(form)});message="新增 "+result.added+" 筆、略過 "+result.skipped+" 筆"+(result.missingCompletionDate?"；"+result.missingCompletionDate+" 筆缺少完成日期":"");}
     else if(type==="announce") {const result=await api("/api/announce",{method:"POST",body:{}});message=result.simulated?"已建立示範通知紀錄，未發送 LINE":"已加入通知佇列，請查看通知紀錄";}
-    else {values.version=state.detail.version;values.editReport=values.editReport==="true";const method=type==="edit"?"PUT":type==="remove"?"DELETE":"POST",suffix=["edit","remove"].includes(type)?"":"/"+type;await api("/api/tasks/"+encodeURIComponent(id)+suffix,{method,body:values});message={claim:"已預約施打",performed:"已移至待施打回報，尚未計入完成施打量",complete:"完成回報已儲存，施打量已更新",cancel:"已取消施打並保留原因",edit:"案件已更新",remove:"案件已移除，操作紀錄已保留"}[type];}
+    else {values.version=state.detail.version;values.editReport=values.editReport==="true";const method=type==="edit"?"PUT":type==="remove"?"DELETE":"POST",suffix=["edit","remove"].includes(type)?"":"/"+type;await api("/api/tasks/"+encodeURIComponent(id)+suffix,{method,body:values});message={claim:"已預約施打",complete:"完成回報已儲存，施打量已更新",cancel:"已取消施打並保留原因",edit:"案件已更新",remove:"案件已移除，操作紀錄已保留"}[type];}
     $("#dialog").close();toast(message);await refresh();
   } catch(error) {toast(error.message,true);}
   finally{submit.disabled=false;submit.textContent=initial;}

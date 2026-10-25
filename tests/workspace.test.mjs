@@ -23,7 +23,7 @@ test('full-width workbench retains its two active stages without dashboard cards
   assert.match(html,/class="workbench-table"/);assert.match(html,/<th>接單者<\/th>/);
   const tabs=run('statusTabs()');for(const status of ['active','pending','claimed'])assert.ok(tabs.includes('data-status="'+status+'"'));
   assert.doesNotMatch(tabs,/data-status="(?:completed|cancelled)"/);
-  assert.match(tabs,/所有案件/);assert.match(tabs,/新開案/);assert.match(tabs,/待施打/);assert.doesNotMatch(tabs,/待施打回報/);
+  assert.match(tabs,/所有案件/);assert.match(tabs,/新開案/);assert.match(tabs,/等候施打/);assert.doesNotMatch(tabs,/待施打回報/);
   const page=readFileSync(new URL('../static/index.html',import.meta.url),'utf8');
   assert.doesNotMatch(page,/data-view="mine"/);assert.match(page,/>案件管理<\/button>/);
 });
