@@ -42,7 +42,7 @@ class PiccWorkflows(unittest.TestCase):
 
     def create(self, **extra):
         payload = {"patientName": "DEMO 個案", "bedNo": "測試01", "mrn": "DEMO001",
-                   "requestId": "request-" + str(uuid.uuid4())}
+                   "requestId": "request-" + str(uuid.uuid4()), "duplicateAcknowledged": True}
         payload.update(extra)
         response = self.client.post("/api/tasks", json=payload, headers=self.headers)
         self.assertEqual(response.status_code, 201, response.json)
@@ -58,6 +58,56 @@ class PiccWorkflows(unittest.TestCase):
                                       "insertionSite": "右上臂", "vein": "Basilic", "catheterType": "雙腔PICC",
                                       "catheterLength": 42.5, "remark": "示範測試"},
                                 headers=self.headers)
+
+    def test_awaiting_report_is_not_counted_until_a_valid_lower_limb_report(self):
+        task = self.claim(self.create()).json["task"]
+        # The shared workspace has its own CSRF token.
+        token = self.client.get("/api/workspace/config").json["csrf"]
+        response = self.client.post(f"/api/workspace/tasks/{task['id']}/performed", json={"version": task["version"]}, headers={"X-CSRF-Token":token})
+        self.assertEqual(response.status_code, 200, response.json)
+        waiting = response.json["task"]
+        self.assertEqual(waiting["status"], "awaiting_report")
+        self.assertEqual(self.client.get("/api/stats").json["totalCompleted"], 0)
+        for site in ("左下肢", "右下肢"):
+            current = waiting if site == "左下肢" else self.claim(self.create()).json["task"]
+            report = {"version": current["version"], "operatorId":"demo-b", "difficulty":"簡單", "insertionSite":site, "vein":"Basilic", "catheterType":"單腔PICC"}
+            result = self.client.post(f"/api/tasks/{current['id']}/complete", json=report, headers=self.headers)
+            self.assertEqual(result.status_code, 200, result.json)
+            self.assertEqual(result.json["task"]["insertionSite"], site)
+        self.assertEqual(self.client.get("/api/stats").json["totalCompleted"], 2)
+
+    def test_seven_day_duplicate_warning_requires_acknowledgement_without_creating_a_row(self):
+        self.create(mrn="DUPLICATE-TEST")
+        payload = {"patientName":"DEMO duplicate", "bedNo":"TEST", "mrn":" DUPLICATE-TEST ", "requestId":"warning-test"}
+        result = self.client.post("/api/tasks", json=payload, headers=self.headers)
+        self.assertEqual(result.json["duplicateCount"], 1)
+        self.assertTrue(result.json["requiresDuplicateConfirmation"])
+        self.assertEqual(len(self.client.get("/api/tasks").json["tasks"]), 1)
+        payload["duplicateAcknowledged"] = True
+        accepted = self.client.post("/api/tasks", json=payload, headers=self.headers)
+        self.assertEqual(accepted.status_code, 201)
+        retry = self.client.post("/api/tasks", json=payload, headers=self.headers)
+        self.assertEqual(retry.json["task"]["id"], accepted.json["task"]["id"])
+        self.assertEqual(len(self.client.get("/api/tasks").json["tasks"]), 2)
+
+    def test_legacy_local_schema_upgrade_preserves_cases_audit_and_foreign_keys(self):
+        task = self.create()
+        legacy = Path(self.temp.name) / "legacy.sqlite3"
+        with closing(sqlite3.connect(self.path)) as source, closing(sqlite3.connect(legacy)) as target:
+            for table in ("users", "tasks", "events", "idempotency", "notifications"):
+                schema = source.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()[0]
+                target.execute(schema.replace(",'awaiting_report'", ""))
+                rows = source.execute("SELECT * FROM " + table).fetchall()
+                if rows:
+                    target.executemany("INSERT INTO " + table + " VALUES(" + ",".join("?" for _ in rows[0]) + ")", rows)
+            target.commit()
+        create_app({"TESTING":True,"DEMO_MODE":True,"DATABASE":str(legacy),"SECRET_KEY":"test-only"})
+        with closing(sqlite3.connect(legacy)) as connection:
+            self.assertEqual(connection.execute("SELECT id FROM tasks").fetchone()[0], task["id"])
+            self.assertGreater(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0], 0)
+            self.assertFalse(connection.execute("PRAGMA foreign_key_check").fetchall())
+            connection.execute("UPDATE tasks SET status='awaiting_report'")
+        self.assertTrue(Path(str(legacy)+".before-workflow-v3.sqlite3").exists())
 
     def test_anonymous_and_csrf_are_rejected(self):
         anonymous = self.app.test_client()

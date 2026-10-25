@@ -46,21 +46,35 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
     async list(page){
       requireReady();const status=page==="booking"?"pending":page==="report"?"claimed":null;
       if(!status)throw new Error("此入口不顯示案件清單");
-      const data=await request("/api/tasks?"+new URLSearchParams({status}));
-      if(!Array.isArray(data.tasks))throw new Error("清單回應格式不正確");
-      return data.tasks.filter(task=>task.status===status);
+      const statuses=page==="report"?["claimed","awaiting_report"]:[status];
+      const responses=await Promise.all(statuses.map(value=>request("/api/tasks?"+new URLSearchParams({status:value}))));
+      const tasks=new Map();
+      responses.forEach((data,index)=>{
+        if(!Array.isArray(data.tasks))throw new Error("清單回應格式不正確");
+        data.tasks.filter(task=>task.status===statuses[index]).forEach(task=>tasks.set(task.id,task));
+      });
+      return [...tasks.values()];
     },
     async detail(id){requireReady();return request("/api/tasks/"+encodeURIComponent(id));},
     async create(values){
       requireReady();const signature=JSON.stringify(Object.keys(values).sort().map(key=>[key,values[key]]));
       if(!draft||draft.signature!==signature)draft={signature,payload:{...values,requestId:uuid()}};
-      const task=updated(await request("/api/tasks",{method:"POST",body:draft.payload}));
+      const result=await request("/api/tasks",{method:"POST",body:draft.payload});
+      if(result?.requiresDuplicateConfirmation){
+        const error=new Error("七日內已有相同病歷號案件，請確認是否重複開單。");
+        error.duplicateWarning=true;error.duplicateCount=result.duplicateCount;throw error;
+      }
+      const task=updated(result);
       draft=null;return task;
     },
     async claim(task,operatorId){
       requireReady();if(!operatorId)throw new Error("請先選擇施打人");
       return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/claim",{
         method:"POST",body:{version:task.version,operatorId}}),"claimed",task.id);
+    },
+    async performed(task){
+      requireReady();return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/performed",{
+        method:"POST",body:{version:task.version}}),"awaiting_report",task.id);
     },
     async complete(task,values){
       requireReady();return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/complete",{

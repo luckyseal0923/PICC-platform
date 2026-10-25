@@ -3,7 +3,7 @@ import {ENTRY_ROUTES,entryPage,createEntryController} from "./entry-controller.j
 const $=selector=>document.querySelector(selector);
 const escape=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const page=entryPage(location.pathname);
-const info={create:["PICC 任務建立","填寫病人資料，建立一筆待預約案件。"],booking:["PICC 待預約清單","以下案件尚未被接單，請選擇施打人後點選「預約施打」。"],report:["PICC 待施打清單","僅顯示已接單、等待施打的案件，點選後填寫施打回報。"]};
+const info={create:["PICC 任務建立","填寫病人資料，建立一筆待預約案件。"],booking:["PICC 待預約清單","以下案件尚未被接單，請選擇施打人後點選「預約施打」。"],report:["PICC 施打回報","顯示待施打與待回報案件，完成回報後會從清單移出。"]};
 const state={members:[],tasks:[],selfReport:false,draft:{},original:null,activeTask:null,busy:false,initialTaskOpened:false,loadVersion:0};
 const dateFormat=new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"});
 const client=createEntryController({onUnavailable:()=>{
@@ -52,7 +52,7 @@ function renderCreate(){
     '<form data-form="create"><label for="bedNo">床號 *</label><input id="bedNo" name="bedNo" maxlength="100" placeholder="例如：10906" autocomplete="off" required value="'+escape(values.bedNo||"")+'">'+
     '<label for="mrn">病歷號 *</label><input id="mrn" name="mrn" maxlength="100" placeholder="請輸入病歷號" inputmode="numeric" autocomplete="off" required value="'+escape(values.mrn||"")+'">'+
     '<label for="patientName">病人姓名 *</label><input id="patientName" name="patientName" maxlength="100" placeholder="請輸入病人姓名" autocomplete="off" required value="'+escape(values.patientName||"")+'">'+
-    (state.selfReport?reportFields(values):"")+notes(values.remark||"")+
+    (state.selfReport?reportFields(values):"")+notes(values.remark||"")+'<div id="duplicateWarning" class="message duplicate-warning" role="alert" tabindex="-1" hidden></div>'+
     '<button class="button primary full" type="submit">'+(state.selfReport?"送出施打回報":"送出")+'</button></form>'+
     (!state.original?'<button class="button self-report full" type="button" data-action="toggle-self">'+(state.selfReport?"改為一般建案":"自起單・自回報")+'</button>':"")+'</section>';
 }
@@ -64,23 +64,27 @@ function waiting(task){
 function taskCard(task){
   const booking=page==="booking",date=new Date(task.createdAt);
   return '<article class="card case-card"><h3>'+escape(task.patientName)+'</h3><p class="patient-meta"><span>床號 '+escape(task.bedNo)+'</span><span>｜ 病歷號 '+escape(task.mrn)+'</span></p>'+
-    '<p class="task-number">任務編號：'+escape(task.taskId)+'</p>'+
+    '<p class="task-number">任務編號：'+escape(task.taskId)+'</p>'+(!booking?'<span class="case-state">'+(task.status==="awaiting_report"?"待回報":"待施打")+'</span>':"")+
     (!booking?'<p class="case-time">起單時間 '+(Number.isNaN(date.getTime())?'未記錄':dateFormat.format(date))+'</p><p class="assignee">接單者：'+escape(task.claimedBy||"未記錄")+'</p><p class="waiting">'+waiting(task)+'</p>':"")+
     (task.hasDifficultHistory?'<p class="difficult">曾有困難放置紀錄</p>':"")+
     (task.remark?'<p class="help">備註：'+escape(task.remark)+'</p>':"")+
     (booking?'<form data-form="claim" data-id="'+escape(task.id)+'"><label for="operator-'+escape(task.id)+'">施打人</label><select id="operator-'+escape(task.id)+'" name="operatorId" required>'+memberOptions()+'</select><button type="submit" class="button primary">預約施打</button></form>':
-      '<div class="case-actions"><button type="button" class="button primary" data-action="complete" data-id="'+escape(task.id)+'">回報完成</button></div>')+
-    '<div class="case-cancel"><button type="button" class="quiet-button" data-action="cancel" data-id="'+escape(task.id)+'">取消施打</button></div></article>';
+      '<div class="case-actions">'+(task.status==="claimed"?'<button type="button" class="button secondary" data-action="performed" data-id="'+escape(task.id)+'">已施打，待回報</button>':"")+'<button type="button" class="button primary" data-action="complete" data-id="'+escape(task.id)+'">回報完成</button></div>')+
+    (task.status!=="awaiting_report"?'<div class="case-cancel"><button type="button" class="quiet-button" data-action="cancel" data-id="'+escape(task.id)+'">取消施打</button></div>':"")+'</article>';
 }
 function renderList(){
-  $("#entryContent").innerHTML='<div class="toolbar"><span>'+state.tasks.length+' 筆'+(page==="booking"?'待預約':'待施打')+'案件</span><button type="button" class="quiet-button" data-action="refresh">重新整理</button></div>'+
-    (state.tasks.length?state.tasks.map(taskCard).join(""):'<section class="card empty"><h2>目前沒有'+(page==="booking"?'待預約':'待施打')+'案件</h2><p>'+(page==="booking"?'新案件建立後會出現在這裡。':'預約完成後，案件會出現在這裡。')+'</p>'+link(page==="booking"?'create':'booking',page==="booking"?'PICC 建案':'前往預約施打')+'</section>');
+  $("#entryContent").innerHTML='<div class="toolbar"><span>'+state.tasks.length+' 筆'+(page==="booking"?'待預約':'待施打／待回報')+'案件</span><button type="button" class="quiet-button" data-action="refresh">重新整理</button></div>'+
+    (state.tasks.length?state.tasks.map(taskCard).join(""):'<section class="card empty"><h2>目前沒有'+(page==="booking"?'待預約':'待施打／待回報')+'案件</h2><p>'+(page==="booking"?'新案件建立後會出現在這裡。':'預約完成後，案件會出現在這裡。')+'</p>'+link(page==="booking"?'create':'booking',page==="booking"?'PICC 建案':'前往預約施打')+'</section>');
 }
 function findTask(id){const task=state.tasks.find(task=>task.id===id);if(!task)throw new Error("找不到此案件，請重新整理清單");return task;}
 function dialog(title,body){$("#dialogTitle").textContent=title;$("#dialogBody").innerHTML=body;if(!$("#entryDialog").open)$("#entryDialog").showModal();}
 function openComplete(task){
   state.activeTask=task;
   dialog("施打回報",patientSummary(task)+'<form data-form="complete">'+reportFields({},task)+notes(task.remark||"",true)+'<div class="form-actions"><button type="button" class="button secondary" data-action="close-dialog">返回清單</button><button type="submit" class="button primary">確認完成回報</button></div><p class="field-error" id="dialogError" role="alert" hidden></p></form>');
+}
+function openPerformed(task){
+  state.activeTask=task;
+  dialog("已施打，待回報",patientSummary(task)+'<p class="dialog-note">確認已施打後，案件會保留在待回報。送出完整回報後才計入施打量。</p><form data-form="performed"><div class="form-actions"><button type="button" class="button secondary" data-action="close-dialog">返回清單</button><button type="submit" class="button primary">確認移至待回報</button></div><p class="field-error" id="dialogError" role="alert" hidden></p></form>');
 }
 function openCancel(task){
   state.activeTask=task;
@@ -124,6 +128,11 @@ async function afterWrite(task,text,extra=""){
   message(text,false,extra);
 }
 function showFailure(error){
+  if(error.duplicateWarning){
+    const box=$("#duplicateWarning");box.hidden=false;
+    box.innerHTML='<strong>請確認是否重複開單</strong><p>七日內已有 '+Number(error.duplicateCount)+' 筆相同病歷號案件。請先確認，再決定是否繼續建立。</p><label><input type="checkbox" name="duplicateAcknowledged" value="true" required> 已確認，仍要建立新案件</label>';
+    box.focus();return;
+  }
   const dialogError=$("#dialogError");
   if($("#entryDialog").open&&dialogError){dialogError.hidden=false;dialogError.textContent=error.message;}
   else message(error.message,true);
@@ -142,7 +151,8 @@ document.addEventListener("click",async event=>{
     else if(action==="toggle-self"){
       state.draft={...state.draft,...Object.fromEntries(new FormData($('form[data-form="create"]')))};
       state.selfReport=!state.selfReport;renderCreate();
-    }else if(action==="complete")openComplete(findTask(button.dataset.id));
+    }else if(action==="performed")openPerformed(findTask(button.dataset.id));
+    else if(action==="complete")openComplete(findTask(button.dataset.id));
     else if(action==="cancel")openCancel(findTask(button.dataset.id));
     else if(action==="refresh")await busy(button,loadPage);
   }catch(error){showFailure(error);}
@@ -154,7 +164,7 @@ document.addEventListener("submit",async event=>{
   const values=Object.fromEntries(new FormData(form));
   await busy(form.querySelector('button[type="submit"]'),async()=>{
     if(form.dataset.form==="create"){
-      const task=await client.create({...values,selfReport:state.selfReport,...(state.original?{copiedFromTaskId:state.original.id}:{})});
+      const task=await client.create({...values,duplicateAcknowledged:values.duplicateAcknowledged==="true",selfReport:state.selfReport,...(state.original?{copiedFromTaskId:state.original.id}:{})});
       const selfReport=state.selfReport;state.draft={};state.original=null;state.selfReport=false;
       if(new URLSearchParams(location.search).has("from"))history.replaceState(null,"",location.pathname);
       renderCreate();
@@ -163,6 +173,9 @@ document.addEventListener("submit",async event=>{
     }else if(form.dataset.form==="claim"){
       const task=await client.claim(findTask(form.dataset.id),values.operatorId);
       await afterWrite(task,"預約完成，案件已移至待施打清單。",link("report","前往施打回報",task.id));
+    }else if(form.dataset.form==="performed"){
+      const task=await client.performed(state.activeTask);$("#entryDialog").close();
+      await afterWrite(task,"已移至待回報，尚未計入完成施打量。");
     }else if(form.dataset.form==="complete"){
       const task=await client.complete(state.activeTask,values);$("#entryDialog").close();
       await afterWrite(task,"完成回報已儲存，施打量已更新。案件已從待施打清單移除。");
@@ -173,6 +186,9 @@ document.addEventListener("submit",async event=>{
         '<p class="receipt-details">取消原因：'+escape(task.cancelReason)+(task.cancelDetail?'；'+escape(task.cancelDetail):'')+'</p><a class="button secondary" href="'+ENTRY_ROUTES.create+'?'+new URLSearchParams({from:task.id})+'">需要再次施打時，重新建案</a>');
     }
   });
+});
+document.addEventListener("input",event=>{
+  if(event.target.name==="mrn"&&$("#duplicateWarning")){ $("#duplicateWarning").hidden=true;$("#duplicateWarning").innerHTML=""; }
 });
 async function boot(){
   try{

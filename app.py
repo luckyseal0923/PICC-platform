@@ -7,6 +7,7 @@ import hmac
 import io
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import sqlite3
@@ -25,9 +26,9 @@ if (ROOT / ".vendor").exists():
 from flask import Flask, g, jsonify, make_response, request, session, send_from_directory
 
 TAIPEI = timezone(timedelta(hours=8))
-STATUSES = {"pending": "待預約", "claimed": "待施打", "completed": "完成", "cancelled": "已取消"}
+STATUSES = {"pending": "待預約", "claimed": "待施打", "awaiting_report": "待回報", "completed": "完成", "cancelled": "已取消"}
 DIFFICULTIES = ["非常簡單", "簡單", "中等", "困難", "非常困難"]
-SITES = ["右上臂", "左上臂", "其他"]
+SITES = ["右上臂", "左上臂", "左下肢", "右下肢", "其他"]
 VEINS = ["Basilic", "Cephalic", "Brachial"]
 CATHETERS = ["雙腔PICC", "單腔PICC"]
 CANCEL_REASONS = ["暫不需要施打", "醫囑調整", "病人因素", "其他"]
@@ -113,7 +114,7 @@ def create_app(config=None):
         CREATE TABLE IF NOT EXISTS tasks(
           id TEXT PRIMARY KEY, task_id TEXT UNIQUE NOT NULL,
           patient_name TEXT NOT NULL, bed_no TEXT NOT NULL, mrn TEXT NOT NULL,
-          status TEXT NOT NULL CHECK(status IN ('pending','claimed','completed','cancelled')),
+          status TEXT NOT NULL CHECK(status IN ('pending','claimed','awaiting_report','completed','cancelled')),
           created_at TEXT NOT NULL, created_by TEXT NOT NULL,
           claimed_id TEXT, claimed_by TEXT, claimed_at TEXT,
           operator_id TEXT, operator_name TEXT, completed_at TEXT,
@@ -144,6 +145,37 @@ def create_app(config=None):
         """)
         if "reorder_of" not in {r["name"] for r in db().execute("PRAGMA table_info(tasks)") }:
             db().execute("ALTER TABLE tasks ADD COLUMN reorder_of TEXT")
+        task_schema = db().execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()[0]
+        if "awaiting_report" not in task_schema:
+            backup_path = Path(str(db_path) + ".before-workflow-v3.sqlite3")
+            if not backup_path.exists():
+                backup = sqlite3.connect(backup_path)
+                try:
+                    db().backup(backup)
+                finally:
+                    backup.close()
+            upgraded = re.sub(r"^CREATE TABLE\s+tasks\b", "CREATE TABLE tasks_status_upgrade", task_schema, count=1, flags=re.I)
+            upgraded = re.sub(r"'claimed'\s*,\s*'completed'", "'claimed','awaiting_report','completed'", upgraded, count=1)
+            if "awaiting_report" not in upgraded:
+                raise RuntimeError("本機案件資料庫需要更新，原始備份已保留")
+            indexes = [row[0] for row in db().execute("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='tasks' AND sql IS NOT NULL")]
+            db().execute("PRAGMA foreign_keys=OFF")
+            db().execute("BEGIN IMMEDIATE")
+            try:
+                db().execute(upgraded)
+                db().execute("INSERT INTO tasks_status_upgrade SELECT * FROM tasks")
+                db().execute("DROP TABLE tasks")
+                db().execute("ALTER TABLE tasks_status_upgrade RENAME TO tasks")
+                for index_sql in indexes:
+                    db().execute(index_sql)
+                if db().execute("PRAGMA foreign_key_check").fetchone():
+                    raise RuntimeError("本機案件資料庫的關聯驗證未通過")
+                db().execute("COMMIT")
+            except Exception:
+                db().execute("ROLLBACK")
+                raise
+            finally:
+                db().execute("PRAGMA foreign_keys=ON")
         if app.config["DEMO_MODE"] and not db().execute("SELECT 1 FROM users").fetchone():
             db().executemany("INSERT INTO users(id,name,role) VALUES(?,?,?)", [
                 ("demo-admin", "示範管理者", "admin"),
@@ -436,7 +468,7 @@ def create_app(config=None):
     @app.get("/api/tasks")
     @app.get("/api/entry/tasks")
     def tasks():
-        if request.path.startswith("/api/entry/") and request.args.get("status") not in ("pending", "claimed"):
+        if request.path.startswith("/api/entry/") and request.args.get("status") not in ("pending", "claimed", "awaiting_report"):
             raise ApiError("請指定待預約或待施打清單", 400)
         clauses, values = ["deleted_at IS NULL"], []
         if request.args.get("status") in STATUSES:
@@ -479,6 +511,11 @@ def create_app(config=None):
             if old["payload_hash"] != signature:
                 raise ApiError("送出識別碼已使用，請重新開啟表單", 409)
             return jsonify(ok=True, duplicate=True, task=task_json(task_row(old["task_id"])))
+        recent = db().execute("SELECT COUNT(*) FROM tasks WHERE TRIM(mrn)=? AND deleted_at IS NULL "
+                              "AND julianday(created_at)>=julianday('now','-7 days') AND julianday(created_at)<=julianday('now')", (mrn,)).fetchone()[0]
+        if recent and data.get("duplicateAcknowledged") is not True:
+            return jsonify(ok=False, requiresDuplicateConfirmation=True, duplicateCount=recent,
+                           error="七日內已有相同病歷號案件，請確認是否重複開單。")
         is_self = data.get("selfReport") is True
         original_id = text(data.get("copiedFromTaskId"))
         if original_id:
@@ -529,14 +566,26 @@ def create_app(config=None):
         notification("claimed", task, u)
         return jsonify(ok=True, task=task)
 
+    @app.post("/api/tasks/<task_id>/performed")
+    @app.post("/api/entry/tasks/<task_id>/performed")
+    @transaction
+    def performed(task_id):
+        u, data, row = user(), body(), task_row(task_id)
+        checked_version(data, row)
+        if row["status"] != "claimed":
+            raise ApiError("只有待施打案件可以標記待回報", 409)
+        db().execute("UPDATE tasks SET status='awaiting_report',updated_at=?,version=version+1 WHERE id=?", (now(), task_id))
+        audit(task_id, "awaiting_report", u, {"previousStatus": "claimed"})
+        return jsonify(ok=True, task=task_json(task_row(task_id)))
+
     @app.post("/api/tasks/<task_id>/complete")
     @app.post("/api/entry/tasks/<task_id>/complete")
     @transaction
     def complete(task_id):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
-        if row["status"] != "claimed":
-            raise ApiError("只有待施打案件可以回報完成", 409)
+        if row["status"] not in ("claimed", "awaiting_report"):
+            raise ApiError("只有待施打或待回報案件可以回報完成", 409)
         report = report_values(data)
         db().execute("UPDATE tasks SET status='completed',operator_id=?,operator_name=?,completed_at=?,difficulty=?,"
                      "insertion_site=?,vein=?,catheter_type=?,catheter_length=?,remark=?,updated_at=?,"
@@ -814,7 +863,7 @@ def create_app(config=None):
                     except ApiError:
                         pass
             time.sleep(15)
-    workspace_views = {"tasks", "detail", "create_task", "claim", "complete", "cancel",
+    workspace_views = {"tasks", "detail", "create_task", "claim", "performed", "complete", "cancel",
                        "edit_task", "delete_task", "users", "save_user", "stats", "export",
                        "import_csv", "notifications"}
     for rule in list(app.url_map.iter_rules()):

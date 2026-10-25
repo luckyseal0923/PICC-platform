@@ -27,7 +27,7 @@ create table if not exists picc_v2_private.tasks (
   patient_name text not null check (length(trim(patient_name)) between 1 and 100),
   bed_no text not null check (length(trim(bed_no)) between 1 and 100),
   mrn text not null check (length(trim(mrn)) between 1 and 100),
-  status text not null check (status in ('pending','claimed','completed','cancelled')),
+  status text not null check (status in ('pending','claimed','awaiting_report','completed','cancelled')),
   created_at timestamptz not null default now(),
   created_by uuid not null references picc_v2_private.members(id),
   claimed_id uuid references picc_v2_private.members(id),
@@ -45,8 +45,12 @@ create table if not exists picc_v2_private.tasks (
   updated_at timestamptz not null default now(),
   check (status<>'cancelled' or (nullif(trim(cancel_reason),'') is not null and cancelled_at is not null))
 );
+alter table picc_v2_private.tasks drop constraint if exists tasks_status_check;
+alter table picc_v2_private.tasks add constraint tasks_status_check
+  check (status in ('pending','claimed','awaiting_report','completed','cancelled'));
 create index if not exists picc_v2_status_idx on picc_v2_private.tasks(status) where deleted_at is null;
 create index if not exists picc_v2_mrn_idx on picc_v2_private.tasks(mrn);
+create index if not exists picc_v2_recent_mrn_idx on picc_v2_private.tasks((trim(mrn)),created_at) where deleted_at is null;
 create index if not exists picc_v2_completion_idx on picc_v2_private.tasks(completed_at,operator_id);
 create table if not exists picc_v2_private.events (
   id bigint generated always as identity primary key,
@@ -89,7 +93,7 @@ returns jsonb language sql stable set search_path='' as $$
   select jsonb_build_object(
     'id',t.id,'taskId',t.task_id,'patientName',t.patient_name,'bedNo',t.bed_no,'mrn',t.mrn,
     'status',t.status,'statusLabel',case t.status when 'pending' then '待預約' when 'claimed' then '待施打'
-      when 'completed' then '完成' when 'cancelled' then '已取消' end,
+      when 'awaiting_report' then '待回報' when 'completed' then '完成' when 'cancelled' then '已取消' end,
     'createdAt',t.created_at,'createdBy',t.created_by,'claimedId',t.claimed_id,'claimedBy',t.claimed_by,
     'claimedAt',t.claimed_at,'operatorId',t.operator_id,'operatorName',t.operator_name,'completedAt',t.completed_at,
     'difficulty',t.difficulty,'insertionSite',t.insertion_site,'vein',t.vein,'catheterType',t.catheter_type,
@@ -123,7 +127,7 @@ begin
   if op.id is null then raise exception '請選擇有效的實際施打者'; end if;
   if coalesce(p_data->>'difficulty','') not in ('非常簡單','簡單','中等','困難','非常困難') then
     raise exception '請選擇放置困難度'; end if;
-  if coalesce(p_data->>'insertionSite','') not in ('右上臂','左上臂','其他') then raise exception '請選擇施打位置'; end if;
+  if coalesce(p_data->>'insertionSite','') not in ('右上臂','左上臂','左下肢','右下肢','其他') then raise exception '請選擇施打位置'; end if;
   if coalesce(p_data->>'vein','') not in ('Basilic','Cephalic','Brachial') then raise exception '請選擇血管'; end if;
   if coalesce(p_data->>'catheterType','') not in ('雙腔PICC','單腔PICC') then raise exception '請選擇管路類型'; end if;
   n:=nullif(p_data->>'catheterLength','')::numeric;
@@ -145,7 +149,7 @@ declare
   name_value text; bed_value text; mrn_value text; reason_value text; detail_value text;
   start_date date; end_date date; scope_mine boolean;
   operators jsonb; months jsonb; created_months jsonb; counts jsonb;
-  missing integer; added integer:=0; skipped integer:=0; affected integer; row_no integer:=1;
+  missing integer; added integer:=0; skipped integer:=0; affected integer; row_no integer:=1; duplicate_count integer;
   next_status text; completed_time timestamptz; created_time timestamptz; legacy_operator uuid;
 begin
   actor:=p_actor;
@@ -238,6 +242,14 @@ begin
       select * into t from picc_v2_private.tasks where id=req.task_id;
       return jsonb_build_object('ok',true,'duplicate',true,'task',picc_v2_private.task_json(t));
     end if;
+    perform pg_advisory_xact_lock(hashtextextended('picc:mrn:'||mrn_value,0));
+    select count(*) into duplicate_count from picc_v2_private.tasks
+      where trim(mrn)=mrn_value and deleted_at is null
+        and created_at>=clock_timestamp()-interval '7 days' and created_at<=clock_timestamp();
+    if duplicate_count>0 and not coalesce((p_payload->>'duplicateAcknowledged')::boolean,false) then
+      return jsonb_build_object('ok',false,'requiresDuplicateConfirmation',true,'duplicateCount',duplicate_count,
+        'error','七日內已有相同病歷號案件，請確認是否重複開單。');
+    end if;
     if nullif(p_payload->>'copiedFromTaskId','') is not null then
       select * into original from picc_v2_private.tasks where id=(p_payload->>'copiedFromTaskId')::uuid and deleted_at is null;
       if original.id is null or original.status<>'cancelled' then raise exception '只有已取消案件可重新起單'; end if;
@@ -267,7 +279,7 @@ begin
       row_no:=row_no+1;
       if nullif(trim(row_data->>'任務編號'),'') is null then raise exception '第 % 列缺少任務編號',row_no; end if;
       if exists(select 1 from picc_v2_private.tasks where task_id=row_data->>'任務編號') then skipped:=skipped+1; continue; end if;
-      next_status:=case row_data->>'Status' when '待預約' then 'pending' when '待施打' then 'claimed'
+      next_status:=case row_data->>'Status' when '待預約' then 'pending' when '待施打' then 'claimed' when '待回報' then 'awaiting_report'
         when '完成' then 'completed' when '已取消' then 'cancelled' end;
       if next_status is null then raise exception '第 % 列狀態無法辨識',row_no; end if;
       created_time:=picc_v2_private.parse_time(row_data->>'起單時間');
@@ -313,8 +325,13 @@ begin
       updated_at=stamp,version=version+1 where id=t.id and status='pending' and version=t.version returning * into t;
     if not found then raise exception '此案件已被其他人預約'; end if;
     perform picc_v2_private.audit(t.id,'claimed',actor,jsonb_build_object('operatorName',op.name));
+  elsif p_action='tasks.performed' then
+    if t.status<>'claimed' then raise exception '只有待施打案件可以標記待回報'; end if;
+    update picc_v2_private.tasks set status='awaiting_report',updated_at=stamp,version=version+1
+      where id=t.id returning * into t;
+    perform picc_v2_private.audit(t.id,'awaiting_report',actor,jsonb_build_object('previousStatus','claimed'));
   elsif p_action='tasks.complete' then
-    if t.status<>'claimed' then raise exception '只有待施打案件可以回報完成'; end if;
+    if t.status not in ('claimed','awaiting_report') then raise exception '只有待施打或待回報案件可以回報完成'; end if;
     report:=picc_v2_private.report(p_payload);
     update picc_v2_private.tasks set status='completed',operator_id=(report->>'operatorId')::uuid,
       operator_name=report->>'operatorName',completed_at=stamp,difficulty=p_payload->>'difficulty',
@@ -377,10 +394,10 @@ begin
     return jsonb_build_object('loginRequired',false,'accessMode','shared','csrf','',
       'user',jsonb_build_object('id',shared_actor.id,'name',shared_actor.name,'role','shared','verified',false));
   end if;
-  if p_action not in ('users.list','tasks.list','tasks.get','tasks.create','tasks.claim','tasks.complete','tasks.cancel') then
+  if p_action not in ('users.list','tasks.list','tasks.get','tasks.create','tasks.claim','tasks.performed','tasks.complete','tasks.cancel') then
     raise exception using errcode='42501',message='共用入口只提供建案、預約與回報操作';
   end if;
-  if p_action='tasks.list' and coalesce(p_payload->>'status','') not in ('pending','claimed') then
+  if p_action='tasks.list' and coalesce(p_payload->>'status','') not in ('pending','claimed','awaiting_report') then
     raise exception '請指定待預約或待施打清單'; end if;
   return picc_v2_private.api_as(shared_actor,p_action,p_payload);
 end;
@@ -399,7 +416,7 @@ begin
       'user',jsonb_build_object('id',actor.id,'name',actor.name,'role','admin','verified',false));
   end if;
   if p_action is null or p_action not in ('users.list','users.save','stats','tasks.list','tasks.get','tasks.create',
-    'tasks.claim','tasks.complete','tasks.cancel','tasks.edit','tasks.remove','tasks.export','tasks.import','notifications.list') then
+    'tasks.claim','tasks.performed','tasks.complete','tasks.cancel','tasks.edit','tasks.remove','tasks.export','tasks.import','notifications.list') then
     raise exception '工作站不支援此操作'; end if;
   if p_action='users.save' then
     select m.role into existing_role from picc_v2_private.members m where m.id=nullif(p_payload->>'id','')::uuid;

@@ -26,8 +26,9 @@ function decorate(root = document) {
   root.querySelectorAll("[data-width]").forEach(el => {el.style.width = Math.max(0, Math.min(100, +el.dataset.width))+"%";});
   root.querySelectorAll("[data-height]").forEach(el => {el.style.height = Math.max(4, Math.min(150, +el.dataset.height))+"px";});
 }
-const labels = {pending:"待預約",claimed:"待施打",completed:"完成",cancelled:"已取消"};
-const eventLabels = {created:"建立任務",claimed:"預約施打",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"待施打公告",announce_pending:"待施打公告"};
+const labels = {active:"進行中",pending:"待預約",claimed:"待施打",awaiting_report:"待回報",completed:"完成",cancelled:"已取消"};
+const activeStatuses=["pending","claimed","awaiting_report"];
+const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_report:"已施打，待回報",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"待施打公告",announce_pending:"待施打公告"};
 const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",requestId:"",detail:null};
 const dateFormatter = new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
 function fmt(value) { if (!value) return "未記錄"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "未記錄" : dateFormatter.format(d); }
@@ -53,7 +54,8 @@ function memberTasks(){return state.view==="mine"?state.tasks.filter(t=>state.mi
 function options(values,current="",placeholder="請選擇") { return '<option value="">'+placeholder+'</option>'+values.map(v=>'<option '+(v===current?"selected":"")+' value="'+esc(v)+'">'+esc(v)+'</option>').join(""); }
 function badge(t) { return '<span class="status '+esc(t.status)+'">'+esc(labels[t.status])+'</span>'; }
 function visibleTasks() {
-  let tasks=state.tasks.filter(t=>state.status==="all" || t.status===state.status);
+  let tasks=state.view==="board"?state.tasks.filter(t=>activeStatuses.includes(t.status)):state.tasks;
+  tasks=tasks.filter(t=>["all","active"].includes(state.status)||t.status===state.status);
   if(state.view==="mine") tasks=tasks.filter(t=>state.mineUserId&&(t.claimedId===state.mineUserId||t.operatorId===state.mineUserId));
   if(state.query) {const q=state.query.toLowerCase(); tasks=tasks.filter(t=>[t.patientName,t.bedNo,t.mrn,t.taskId].some(x=>String(x||"").toLowerCase().includes(q)));}
   if(state.view==="admin") {
@@ -80,6 +82,11 @@ function reportFields(t={}) {
   field("管路長度（cm）","catheterLength",t.catheterLength || "","number",false,true)+'</div></div>';
 }
 function remarkField(value="") {return '<div class="field full section-spacer"><label for="f-remark">備註</label><textarea id="f-remark" name="remark" maxlength="1000" placeholder="補充施打或交接資訊（可不填）">'+esc(value)+'</textarea></div>';}
+function duplicateWarning(result){
+  const box=$("#duplicateWarning");box.hidden=false;
+  box.innerHTML='<strong>請確認是否重複開單</strong><p>七日內已有 '+Number(result.duplicateCount)+' 筆相同病歷號的案件。請先確認，再決定是否繼續建立。</p><label><input type="checkbox" name="duplicateAcknowledged" value="true" required> 已確認，仍要建立新案件</label>';
+  box.focus();
+}
 function formActions(label="儲存",style="primary") {return '<div class="form-actions"><button class="button secondary" type="button" data-action="close">返回</button><button type="submit" class="button '+style+'">'+esc(label)+'</button></div>';}
 function patientInfo(t) {return '<div class="detail-grid"><div><small>病人姓名</small><p>'+esc(t.patientName)+'</p></div><div><small>目前狀態</small>'+badge(t)+'</div><div><small>床號</small><p>'+esc(t.bedNo)+'</p></div><div><small>病歷號</small><p>'+esc(t.mrn)+'</p></div></div>';}
 function showCreate(self=false, source=null) {
@@ -87,7 +94,7 @@ function showCreate(self=false, source=null) {
   state.copiedFromTaskId=source?.id || "";
   modal(source?"重新起單":self?"自起單・自回報":"新增 PICC 任務",source?"原取消案件保留不變，新案件使用新的任務編號。":"填寫病人資訊，"+(self?"直接記錄此次已完成的施打。":"建立一筆待預約案件。"),
   (source?'<div class="alert">原案件 '+esc(source.taskId)+' 已取消。請確認新案件的病人資料，重新安排施打。</div>':'<div class="tabs section-spacer"><button class="tab '+(!self?"active":"")+'" data-action="create-normal">一般起單</button><button class="tab '+(self?"active":"")+'" data-action="create-self">自起單・自回報</button></div>')+
-  '<form data-form="create" data-self="'+self+'" class="section-spacer"><div class="form-grid">'+field("病人姓名","patientName",source?.patientName || "","text",true,true)+field("床號","bedNo",source?.bedNo || "","text",true)+field("病歷號","mrn",source?.mrn || "","text",true)+'</div>'+(self?reportFields():"")+remarkField()+formActions(self?"送出施打回報":"建立待預約任務")+'</form>');
+  '<form data-form="create" data-self="'+self+'" class="section-spacer"><div class="form-grid">'+field("病人姓名","patientName",source?.patientName || "","text",true,true)+field("床號","bedNo",source?.bedNo || "","text",true)+field("病歷號","mrn",source?.mrn || "","text",true)+'</div>'+(self?reportFields():"")+remarkField()+'<div id="duplicateWarning" class="alert duplicate-warning section-spacer" role="alert" tabindex="-1" hidden></div>'+formActions(self?"送出施打回報":"建立待預約任務")+'</form>');
 }
 function findTask(id) {const t=state.tasks.find(t=>t.id===id); if(!t) throw new Error("找不到此案件，請重新整理"); return t;}
 function showClaim(id) {
@@ -97,6 +104,10 @@ function showClaim(id) {
 function showComplete(id) {
   const t=findTask(id); state.detail=t;
   modal("完成施打回報",t.taskId,patientInfo(t)+'<form data-form="complete" data-id="'+esc(id)+'">'+reportFields(t)+remarkField(t.remark)+formActions("確認完成回報")+'</form>');
+}
+function showPerformed(id){
+  const t=findTask(id);state.detail=t;
+  modal("已施打，待回報",t.taskId,patientInfo(t)+'<p class="alert info-alert section-spacer">確認已施打後，案件會保留在「待回報」。送出完整施打回報後，才計入完成施打量。</p><form data-form="performed" data-id="'+esc(id)+'">'+formActions("確認移至待回報")+'</form>');
 }
 function showCancel(id) {
   const t=findTask(id); state.detail=t;
@@ -130,7 +141,8 @@ async function showDetail(id) {
 function taskButtons(t,detail=false) {
   let html="";
   if(t.status==="pending") html+='<button class="button '+(detail?"primary":"secondary")+'" data-action="claim" data-id="'+esc(t.id)+'">預約施打</button>';
-  if(t.status==="claimed") html+='<button class="button primary" data-action="complete" data-id="'+esc(t.id)+'">'+icon("check")+'回報完成</button>';
+  if(t.status==="claimed") html+='<button class="button secondary" data-action="performed" data-id="'+esc(t.id)+'">已施打，待回報</button>';
+  if(["claimed","awaiting_report"].includes(t.status)) html+='<button class="button primary" data-action="complete" data-id="'+esc(t.id)+'">'+icon("check")+'回報完成</button>';
   if(["pending","claimed"].includes(t.status)) html+='<button class="button '+(detail?"warning":"text-button")+'" data-action="cancel" data-id="'+esc(t.id)+'">取消</button>';
   if(t.status==="cancelled") html+='<button class="button secondary" data-action="reorder" data-id="'+esc(t.id)+'">重新起單</button>';
   return html;
@@ -140,8 +152,9 @@ function card(t) {
 }
 function empty(message="目前沒有符合條件的案件",hint="試試切換狀態或搜尋條件。") {return '<div class="empty"><div class="empty-icon">'+icon("file")+'</div><h3>'+esc(message)+'</h3><p>'+esc(hint)+'</p></div>';}
 function statusTabs() {
-  let source=memberTasks();
-  return '<div class="tabs">'+["pending","claimed","completed","cancelled","all"].map(s=>'<button class="tab '+(state.status===s?"active":"")+'" data-status="'+s+'">'+(s==="all"?"全部":labels[s])+'<span>'+source.filter(t=>s==="all"||t.status===s).length+'</span></button>').join("")+'</div>';
+  const source=state.view==="board"?state.tasks.filter(t=>activeStatuses.includes(t.status)):memberTasks();
+  const statuses=state.view==="board"?["active",...activeStatuses]:["all",...activeStatuses,"completed","cancelled"];
+  return '<div class="tabs">'+statuses.map(s=>'<button class="tab '+(state.status===s?"active":"")+'" data-status="'+s+'">'+(s==="all"?"全部":labels[s])+'<span>'+source.filter(t=>["all","active"].includes(s)||t.status===s).length+'</span></button>').join("")+'</div>';
 }
 function searchBox(){return '<div class="search-wrap">'+icon("search")+'<input id="taskSearch" placeholder="姓名、床號或病歷號" aria-label="搜尋案件" value="'+esc(state.query)+'"></div>';}
 function metrics() {
@@ -149,11 +162,9 @@ function metrics() {
   return '<div class="metrics">'+entries.map(([s,label,hint,i])=>'<button class="metric" data-status="'+s+'" aria-pressed="'+(state.status===s)+'"><div class="metric-head">'+label+'<span class="metric-icon">'+icon(i)+'</span></div><div class="metric-number">'+memberTasks().filter(t=>t.status===s).length+'</div><small>'+hint+'</small></button>').join("")+'</div>';
 }
 function renderBoard() {
-  const tasks=visibleTasks(),completed=memberTasks().filter(t=>t.status==="completed").length;
-  const picked=state.view==="mine";
-  const picker=picked?'<div class="filters"><div class="field"><label for="mineMember">施打者</label><select id="mineMember">'+userOptions(state.mineUserId)+'</select></div></div>':"";
-  const list=tasks.length?tasks.map(card).join(""):empty(picked&&!state.mineUserId?"請先選擇施打者":undefined);
-  return picker+metrics()+'<div class="content-layout"><section class="panel board-panel"><div class="panel-head"><h2>'+(picked?"成員案件":"團隊案件")+'</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="task-list">'+list+'</div></section><aside class="side-stack"><section class="panel side-panel volume-panel"><p class="eyebrow">PRACTICE TOTAL</p><h3>'+(picked?"此成員完成施打量":"全隊完成施打量")+'</h3><div class="side-number">'+completed+'<small>筆</small></div><p>按實際施打者計算，取消案件不納入。</p><button class="subtle-link" data-view="stats">查看施打統計 '+icon("chevron")+'</button></section><section class="panel side-panel quick-panel"><p class="eyebrow">QUICK REPORT</p><h3>現場已完成施打？</h3><p class="section-spacer">自起單・自回報可直接記錄完成案件。</p><button class="button secondary" data-action="create-self">'+icon("plus")+'自起單・自回報</button></section></aside></div>';
+  const tasks=visibleTasks();
+  const list=tasks.length?tasks.map(card).join(""):empty("目前沒有符合條件的進行中案件","完成與取消案件可至「全部案件」查閱。");
+  return '<section class="panel board-panel active-workbench"><div class="panel-head"><h2>進行中案件</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="task-list">'+list+'</div></section>';
 }
 function chart(items) {
   if(!items.length)return empty("此期間沒有統計資料","可調整日期範圍。");
@@ -193,7 +204,7 @@ async function renderNotifications() {
   const status={simulated:"示範紀錄（未發送）",queued:"待發送",sent:"服務確認送出",failed:"發送未完成",sending:"發送中"};
   return '<div class="alert info-alert">案件寫入與通知結果分開記錄。通知未完成時可重試，無需重複建立或回報案件。</div><section class="panel"><div class="panel-head"><h2>LINE 通知紀錄</h2><button class="button secondary small-button" data-action="announce">預覽待施打公告</button></div><div class="table-scroll"><table><thead><tr><th>時間</th><th>通知事件</th><th>操作人</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+data.notifications.map(n=>'<tr><td>'+fmt(n.created_at)+'</td><td>'+esc(eventLabels[n.event]||n.event)+'</td><td>'+esc(n.actor_name)+'</td><td>'+esc(status[n.status]||n.status)+(n.last_error?'<small>'+esc(n.last_error)+'</small>':"")+'</td><td>'+((n.status==="queued"||n.status==="failed")?'<button class="button secondary small-button" data-action="retry" data-id="'+n.id+'">重試通知</button>':"—")+'</td></tr>').join("")+'</tbody></table>'+(data.notifications.length?"":empty("還沒有通知紀錄","新增或更新案件後會顯示於此。"))+'</div></section>';
 }
-const viewInfo={board:["TEAM WORKSPACE","工作台","待預約、待施打與完成回報，在同一處掌握。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PRACTICE INSIGHTS","施打統計","按實際施打者與完成日期，掌握個別施打量。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
+const viewInfo={board:["TEAM WORKSPACE","工作台","聚焦待預約、待施打與待回報；完成後可至全部案件查閱。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PRACTICE INSIGHTS","施打統計","按實際施打者與完成日期，掌握個別施打量。"],admin:["TASK MANAGEMENT","全部案件","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
 let renderVersion=0;
 async function render() {
   const version=++renderVersion, info=viewInfo[state.view];
@@ -226,7 +237,7 @@ async function enter(data) {
   if(state.config.trialMode)$("#demoBanner").textContent="測試環境 · 使用假資料";
   $("#profileName").textContent="PICC 團隊";$("#profileInitial").textContent="P";$("#profileRole").textContent="共用工作站";
   document.querySelectorAll(".admin-only").forEach(el=>{el.hidden=state.user.role!=="admin";});
-  state.view="board";state.status="pending";
+  state.view="board";state.status="active";
   const today=taipeiDate();state.statsStart=today.slice(0,8)+"01";state.statsEnd=today;state.statsScope=state.user.role==="admin"?"all":"mine";
   $("#today").textContent=new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"long",day:"numeric",weekday:"long",timeZone:"Asia/Taipei"}).format(new Date());
   await refresh();
@@ -246,7 +257,7 @@ function showAnnouncement() {
 }
 const actions={
   close:()=>$("#dialog").close(),"create-normal":()=>showCreate(false),"create-self":()=>showCreate(true),
-  claim:showClaim,complete:showComplete,cancel:showCancel,reorder:showReorder,edit:showEdit,remove:showRemove,detail:showDetail,member:showMember,import:showImport,announce:showAnnouncement,
+  claim:showClaim,performed:showPerformed,complete:showComplete,cancel:showCancel,reorder:showReorder,edit:showEdit,remove:showRemove,detail:showDetail,member:showMember,import:showImport,announce:showAnnouncement,
   "filter-stats":async()=>{const start=$("#statsStart").value,end=$("#statsEnd").value;if(start&&end&&start>end)throw new Error("開始日期不能晚於結束日期");state.statsStart=start;state.statsEnd=end;state.statsScope="all";await render();},
   "all-stats":async()=>{state.statsStart="";state.statsEnd="";state.statsScope="all";await render();},
   "filter-admin":()=>{const start=$("#adminStart").value,end=$("#adminEnd").value;if(start&&end&&start>end)throw new Error("開始日期不能晚於結束日期");state.adminStart=start;state.adminEnd=end;state.page=1;return render();},
@@ -258,7 +269,7 @@ const actions={
 document.addEventListener("click",async e=>{
   const target=e.target.closest("button");if(!target||target.disabled)return;
   try {
-    if(target.dataset.view){const view=target.dataset.view;if(["admin","members","notifications"].includes(view)&&state.user.role!=="admin")return;state.view=view;state.status=view==="mine"?"claimed":view==="admin"?"all":"pending";state.query="";state.page=1;await render();}
+    if(target.dataset.view){const view=target.dataset.view;if(["admin","members","notifications"].includes(view)&&state.user.role!=="admin")return;state.view=view;state.status=view==="admin"?"all":view==="board"?"active":"pending";state.query="";state.page=1;await render();}
     else if(target.dataset.status){state.status=target.dataset.status;state.page=1;await render();}
     else if(target.dataset.action){const action=actions[target.dataset.action];if(action)await action(target.dataset.id);}
 
@@ -266,7 +277,10 @@ document.addEventListener("click",async e=>{
 });
 document.addEventListener("input",e=>{
   if(e.target.id==="taskSearch"){state.query=e.target.value;state.page=1;clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>render().catch(err=>toast(err.message,true)),200);}
-  if(e.target.closest('form[data-form="create"]'))state.requestId=crypto.randomUUID();
+  if(e.target.closest('form[data-form="create"]')){
+    state.requestId=crypto.randomUUID();
+    if(e.target.name==="mrn"&&$("#duplicateWarning")){ $("#duplicateWarning").hidden=true;$("#duplicateWarning").innerHTML=""; }
+  }
   if(e.target.id==="f-reason"&&$('form[data-form="cancel"]'))$("#f-detail").required=e.target.value==="其他";
 });
 document.addEventListener("change",e=>{if(e.target.id==="pageSize"){state.pageSize=+e.target.value;state.page=1;render().catch(err=>toast(err.message,true));}if(e.target.id==="editReportToggle"){$("#editReportFields").disabled=!e.target.checked;$("#editReportFields").hidden=!e.target.checked;}});
@@ -276,11 +290,11 @@ document.addEventListener("submit",async e=>{
   const type=form.dataset.form,id=form.dataset.id;
   let values=Object.fromEntries(new FormData(form).entries()),message="已儲存";
   try {
-    if(type==="create") {values.selfReport=form.dataset.self==="true";values.requestId=state.requestId;if(state.copiedFromTaskId)values.copiedFromTaskId=state.copiedFromTaskId;await api("/api/tasks",{method:"POST",body:values});message=values.selfReport?"已完成回報，施打量已更新":state.copiedFromTaskId?"已建立新任務，原取消紀錄已保留":"已建立待預約任務";}
+    if(type==="create") {values.selfReport=form.dataset.self==="true";values.requestId=state.requestId;if(state.copiedFromTaskId)values.copiedFromTaskId=state.copiedFromTaskId;values.duplicateAcknowledged=values.duplicateAcknowledged==="true";const result=await api("/api/tasks",{method:"POST",body:values});if(result.requiresDuplicateConfirmation){duplicateWarning(result);return;}message=values.selfReport?"已完成回報，施打量已更新":state.copiedFromTaskId?"已建立新任務，原取消紀錄已保留":"已建立待預約任務";}
     else if(type==="member") {values.id=id;values.enabled=values.enabled==="true";await api("/api/users",{method:"POST",body:values});message="已更新團隊成員";}
     else if(type==="import") {const result=await api("/api/import",{method:"POST",body:new FormData(form)});message="新增 "+result.added+" 筆、略過 "+result.skipped+" 筆"+(result.missingCompletionDate?"；"+result.missingCompletionDate+" 筆缺少完成日期":"");}
     else if(type==="announce") {const result=await api("/api/announce",{method:"POST",body:{}});message=result.simulated?"已建立示範通知紀錄，未發送 LINE":"已加入通知佇列，請查看通知紀錄";}
-    else {values.version=state.detail.version;values.editReport=values.editReport==="true";const method=type==="edit"?"PUT":type==="remove"?"DELETE":"POST",suffix=["edit","remove"].includes(type)?"":"/"+type;await api("/api/tasks/"+encodeURIComponent(id)+suffix,{method,body:values});message={claim:"已預約施打",complete:"完成回報已儲存，施打量已更新",cancel:"已取消施打並保留原因",edit:"案件已更新",remove:"案件已移除，操作紀錄已保留"}[type];}
+    else {values.version=state.detail.version;values.editReport=values.editReport==="true";const method=type==="edit"?"PUT":type==="remove"?"DELETE":"POST",suffix=["edit","remove"].includes(type)?"":"/"+type;await api("/api/tasks/"+encodeURIComponent(id)+suffix,{method,body:values});message={claim:"已預約施打",performed:"已移至待回報，尚未計入完成施打量",complete:"完成回報已儲存，施打量已更新",cancel:"已取消施打並保留原因",edit:"案件已更新",remove:"案件已移除，操作紀錄已保留"}[type];}
     $("#dialog").close();toast(message);await refresh();
   } catch(error) {toast(error.message,true);}
   finally{submit.disabled=false;submit.textContent=initial;}

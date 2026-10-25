@@ -3,7 +3,7 @@ import {createClient} from "@supabase/supabase-js";
 export const enums={
   cancelReasons:["暫不需要施打","醫囑調整","病人因素","其他"],
   difficulties:["非常簡單","簡單","中等","困難","非常困難"],
-  sites:["右上臂","左上臂","其他"],veins:["Basilic","Cephalic","Brachial"],catheters:["雙腔PICC","單腔PICC"]
+  sites:["右上臂","左上臂","左下肢","右下肢","其他"],veins:["Basilic","Cephalic","Brachial"],catheters:["雙腔PICC","單腔PICC"]
 };
 
 export function parseCSV(input){
@@ -65,7 +65,7 @@ export function createAdapter(client,config,base="http://localhost",entryClient=
       }
       if(url.pathname==="/api/notifications")return workspaceRpc("notifications.list",{});
       if(url.pathname==="/api/tasks")return workspaceRpc(method==="GET"?"tasks.list":"tasks.create");
-      const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|complete|cancel))?$/);
+      const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|performed|complete|cancel))?$/);
       if(match){payload.id=decodeURIComponent(match[1]);return workspaceRpc("tasks."+(match[2]||(method==="GET"?"get":method==="PUT"?"edit":method==="DELETE"?"remove":"unsupported")));}
       throw new Error("工作站不支援此操作");
     },
@@ -74,7 +74,7 @@ export function createAdapter(client,config,base="http://localhost",entryClient=
       if(url.pathname==="/api/config")return {demo:false,trialMode:Boolean(config.trialMode),backend:"supabase",appName:"picc-v2",notificationsEnabled:false,...enums,...await rpc("entry.info",{},true)};
       if(url.pathname==="/api/users"&&method==="GET")return rpc("users.list",{},true);
       if(url.pathname==="/api/tasks"&&["GET","POST"].includes(method))return rpc(method==="GET"?"tasks.list":"tasks.create",payload,true);
-      const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|complete|cancel))?$/);
+      const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|performed|complete|cancel))?$/);
       if(match&&((method==="GET"&&!match[2])||(method==="POST"&&match[2]))){
         payload.id=decodeURIComponent(match[1]);return rpc("tasks."+(match[2]||"get"),payload,true);
       }
@@ -109,7 +109,7 @@ export function createAdapter(client,config,base="http://localhost",entryClient=
       if(url.pathname==="/api/notifications")return rpc("notifications.list");
       if(url.pathname==="/api/announce")throw new Error("LINE 通知保留於下一階段串接");
       if(url.pathname==="/api/tasks")return rpc(method==="GET"?"tasks.list":"tasks.create",payload);
-      const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|complete|cancel))?$/);
+      const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|performed|complete|cancel))?$/);
       if(match){
         payload.id=decodeURIComponent(match[1]);
         const action=match[2]|| (method==="GET"?"get":method==="PUT"?"edit":method==="DELETE"?"remove":null);

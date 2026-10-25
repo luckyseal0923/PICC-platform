@@ -15,9 +15,9 @@ const SHARED="00000000-0000-4000-8000-000000000001";
 async function entry(action,payload={}){return db.transaction(async tx=>{await tx.exec("set local role anon");await tx.query("select set_config('request.jwt.claim.sub','',true)");return(await tx.query("select public.picc_v2_entry_api($1,$2::jsonb) as data",[action,JSON.stringify(payload)])).rows[0].data;});}
 const WORKSPACE="00000000-0000-4000-8000-000000000002";
 async function workspace(action,payload={}){return db.transaction(async tx=>{await tx.exec("set local role anon");await tx.query("select set_config('request.jwt.claim.sub','',true)");return(await tx.query("select public.picc_v2_workspace_api($1,$2::jsonb) as data",[action,JSON.stringify(payload)])).rows[0].data;});}
-async function entryCreate(extra={}){return(await entry("tasks.create",{patientName:"DEMO shared",bedNo:"TEST",mrn:"DEMO-SHARED",requestId:"entry-"+(++sequence),...extra})).task;}
+async function entryCreate(extra={}){return(await entry("tasks.create",{patientName:"DEMO shared",bedNo:"TEST",mrn:"DEMO-SHARED",requestId:"entry-"+(++sequence),duplicateAcknowledged:true,...extra})).task;}
 async function rejects(uid,action,payload,pattern){await assert.rejects(()=>rpc(uid,action,payload),pattern);}
-async function create(extra={}){return(await rpc(A,"tasks.create",{patientName:"DEMO PG",bedNo:"TEST",mrn:"DEMO-PG",requestId:"request-"+(++sequence),...extra})).task;}
+async function create(extra={}){return(await rpc(A,"tasks.create",{patientName:"DEMO PG",bedNo:"TEST",mrn:"DEMO-PG",requestId:"request-"+(++sequence),duplicateAcknowledged:true,...extra})).task;}
 async function claim(t,op=B){return(await rpc(A,"tasks.claim",{id:t.id,version:t.version,operatorId:op})).task;}
 const report={operatorId:C,difficulty:"困難",insertionSite:"右上臂",vein:"Basilic",catheterType:"雙腔PICC",catheterLength:40,remark:"PG測試"};
 async function complete(t,extra={}){return(await rpc(A,"tasks.complete",{id:t.id,version:t.version,...report,...extra})).task;}
@@ -63,6 +63,39 @@ await test("workspace roster rename preserves existing personal account links",a
 await test("desktop shared actor cannot be counted as a clinical performer",async()=>{const t=await entryCreate();await assert.rejects(()=>workspace("tasks.claim",{id:t.id,version:t.version,operatorId:WORKSPACE}),/有效的預約施打者/);await assert.rejects(()=>workspace("users.save",{id:WORKSPACE,name:"Changed",role:"operator",enabled:false}),/共用入口不是施打成員/);});
 await test("desktop workspace does not enable LINE announcements or arbitrary functions",async()=>{for(const action of["announce","auth.login","pg_read_file"])await assert.rejects(()=>workspace(action,{}),/工作站不支援此操作/);});
 await test("disabling the desktop actor closes the full workspace without changing phone access",async()=>{await db.query("update picc_v2_private.members set enabled=false where id=$1",[WORKSPACE]);try{await assert.rejects(()=>workspace("workspace.info"),/共用工作站目前無法使用/);assert.equal((await entry("entry.info")).loginRequired,false);}finally{await db.query("update picc_v2_private.members set enabled=true where id=$1",[WORKSPACE]);}});
+await test("awaiting report survives migration, preserves audit and does not count until report completion",async()=>{
+  let t=await claim(await create({mrn:"DEMO-AWAITING-V3"}),C);const before=(await rpc(A,"stats")).totalCompleted;
+  const stale=t.version;t=(await entry("tasks.performed",{id:t.id,version:t.version})).task;
+  assert.equal(t.status,"awaiting_report");assert.equal(t.statusLabel,"待回報");assert.equal((await rpc(A,"stats")).totalCompleted,before);
+  await assert.rejects(()=>entry("tasks.performed",{id:t.id,version:stale}),/其他人更新/);
+  await db.exec(await readFile(new URL("../supabase/migrations/202610140001_picc_v2.sql",import.meta.url),"utf8"));
+  assert.equal((await entry("tasks.get",{id:t.id})).task.status,"awaiting_report");
+  assert((await entry("tasks.list",{status:"awaiting_report"})).tasks.some(x=>x.id===t.id));
+  assert((await entry("tasks.get",{id:t.id})).events.some(e=>e.action==="awaiting_report"));
+  await assert.rejects(()=>entry("tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"}),/只有待預約/);
+  t=(await entry("tasks.complete",{id:t.id,version:t.version,...report,insertionSite:"左下肢"})).task;
+  assert.equal(t.insertionSite,"左下肢");assert.equal((await rpc(A,"stats")).totalCompleted,before+1);
+});
+await test("right lower limb is accepted by the real report validator",async()=>{
+  const t=await claim(await create({mrn:"DEMO-RIGHT-LEG-V3"}),C);
+  assert.equal((await rpc(A,"tasks.complete",{id:t.id,version:t.version,...report,insertionSite:"右下肢"})).task.insertionSite,"右下肢");
+});
+await test("seven-day duplicate warning is shared across actors, does not create a row and permits acknowledged idempotent submission",async()=>{
+  await create({mrn:"DEMO-DUPLICATE-V3"});
+  const payload={patientName:"DEMO duplicate",bedNo:"TEST",mrn:" DEMO-DUPLICATE-V3 ",requestId:"warn-v3"};
+  const warning=await entry("tasks.create",payload);assert.equal(warning.requiresDuplicateConfirmation,true);assert.equal(warning.duplicateCount,1);assert.equal(warning.task,undefined);
+  assert.equal((await rpc(A,"tasks.list",{q:"DEMO-DUPLICATE-V3"})).tasks.length,1);
+  const accepted=await entry("tasks.create",{...payload,duplicateAcknowledged:true});
+  assert.equal(accepted.task.status,"pending");
+  const retry=await entry("tasks.create",{...payload,duplicateAcknowledged:true});assert.equal(retry.task.id,accepted.task.id);assert.equal(retry.duplicate,true);
+  assert.equal((await rpc(A,"tasks.list",{q:"DEMO-DUPLICATE-V3"})).tasks.length,2);
+});
+await test("duplicate check ignores cases older than seven days and removed test cases",async()=>{
+  const old=await create({mrn:"DEMO-OLD-V3"});await db.query("update picc_v2_private.tasks set created_at=now()-interval '8 days' where id=$1",[old.id]);
+  assert((await entry("tasks.create",{patientName:"DEMO old",bedNo:"TEST",mrn:old.mrn,requestId:"old-v3"})).task);
+  const removed=await create({mrn:"DEMO-REMOVED-V3"});await rpc(A,"tasks.remove",{id:removed.id,version:removed.version,reason:"Synthetic cleanup"});
+  assert((await entry("tasks.create",{patientName:"DEMO removed",bedNo:"TEST",mrn:removed.mrn,requestId:"removed-v3"})).task);
+});
 console.log("Supabase SQL:",results.length,"passed");
 }catch(error){process.exitCode=1;console.error(error.stack);}
 finally{await mkdir(new URL("../verification/",import.meta.url),{recursive:true});await writeFile(new URL("../verification/supabase-tests.json",import.meta.url),JSON.stringify({engine:"PGlite PostgreSQL",passed:results.filter(r=>r.passed).length,total:results.length,scope:"SQL and role behavior locally; not remote Supabase, not native multi-connection load testing",results},null,2));await db.close();}

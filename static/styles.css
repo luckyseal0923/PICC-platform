@@ -151,4 +151,8 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
   .field input,.field select,.field textarea{font-size:16px}.dialog-head{padding:23px 21px 19px}.dialog-head h2{font-size:21px}.dialog-body{padding:22px 21px}
   .pager{flex-wrap:wrap}.page-footer{padding:10px 18px 28px;font-size:11px}
 }
+.status.awaiting_report{background:#f0eafa;color:#67448e}
+.active-workbench .empty{min-height:340px}
+.duplicate-warning p{margin-top:7px}.duplicate-warning label{display:flex;align-items:start;gap:10px;margin-top:14px;font-size:14px;font-weight:600}
+.duplicate-warning input[type=checkbox]{width:18px;height:18px;min-height:18px;flex-shrink:0;padding:0;margin:3px 0 0;accent-color:var(--teal)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
