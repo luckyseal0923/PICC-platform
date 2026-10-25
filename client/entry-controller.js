@@ -46,7 +46,7 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
     async list(page){
       requireReady();const status=page==="booking"?"pending":page==="report"?"claimed":null;
       if(!status)throw new Error("此入口不顯示案件清單");
-      const statuses=page==="report"?["claimed","awaiting_report"]:[status];
+      const statuses=[status];
       const responses=await Promise.all(statuses.map(value=>request("/api/tasks?"+new URLSearchParams({status:value}))));
       const tasks=new Map();
       responses.forEach((data,index)=>{
@@ -72,10 +72,7 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
       return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/claim",{
         method:"POST",body:{version:task.version,operatorId}}),"claimed",task.id);
     },
-    async performed(task){
-      requireReady();return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/performed",{
-        method:"POST",body:{version:task.version}}),"awaiting_report",task.id);
-    },
+    async performed(){throw new Error("請直接使用施打回報，已不再設置待回報階段");},
     async complete(task,values){
       requireReady();return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/complete",{
         method:"POST",body:{...values,version:task.version}}),"completed",task.id);

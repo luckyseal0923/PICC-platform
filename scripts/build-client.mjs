@@ -4,10 +4,11 @@ import {createHash} from "node:crypto";
 await build({entryPoints:["client/supabase-adapter.js"],bundle:true,format:"iife",target:["es2020"],outfile:"static/supabase-adapter.js",minify:true,legalComments:"eof"});
 await build({entryPoints:["client/entry.js"],bundle:true,format:"iife",target:["es2020"],outfile:"static/entry.js",minify:true,legalComments:"eof"});
 await build({entryPoints:["client/landing.js"],bundle:true,format:"iife",target:["es2020"],outfile:"static/landing.js",minify:true});
+await build({entryPoints:["client/workbook-export.js"],bundle:true,format:"esm",platform:"browser",target:["es2020"],outfile:"static/workbook-export.js",minify:true,legalComments:"eof"});
 await import("./build-mobile-preview.mjs");
 // Asset versions make existing browsers load the matching CSS and JS after a deployment.
 const assetVersions={};
-for(const file of ["styles.css","app.js","supabase-adapter.js","entry.css","entry.js","landing.js"]){
+for(const file of ["styles.css","app.js","supabase-adapter.js","entry.css","entry.js","landing.js","workbook-export.js"]){
   assetVersions[file]=createHash("sha256").update(await readFile("static/"+file)).digest("hex").slice(0,12);
 }
 for(const file of ["index.html","entry.html","landing.html"]){
@@ -15,7 +16,7 @@ for(const file of ["index.html","entry.html","landing.html"]){
   await writeFile("static/"+file,page.replace(/\/assets\/([a-z-]+\.(?:js|css))(?:\?v=[a-f0-9]+)?/g,(url,asset)=>assetVersions[asset]?"/assets/"+asset+"?v="+assetVersions[asset]:url));
 }
 await mkdir("dist/assets",{recursive:true});
-for(const file of ["styles.css","app.js","config.js","supabase-adapter.js","entry.css","entry.js","landing.js"])await copyFile("static/"+file,"dist/assets/"+file);
+for(const file of ["styles.css","app.js","config.js","supabase-adapter.js","entry.css","entry.js","landing.js","workbook-export.js"])await copyFile("static/"+file,"dist/assets/"+file);
 await copyFile("static/landing.html","dist/index.html");
 await mkdir("dist/workspace",{recursive:true});
 await copyFile("static/index.html","dist/workspace/index.html");

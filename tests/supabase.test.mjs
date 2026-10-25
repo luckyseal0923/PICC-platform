@@ -32,7 +32,7 @@ await test("quotes and HTML remain plain patient data",async()=>{const t=await c
 await test("idempotency prevents repeat creation and rejects changed payload",async()=>{const p={patientName:"DEMO repeat",bedNo:"TEST",mrn:"DEMO-REPEAT",requestId:"repeat-key"};const a=await rpc(A,"tasks.create",p),b=await rpc(A,"tasks.create",p);assert.equal(a.task.id,b.task.id);assert.equal(b.duplicate,true);await rejects(A,"tasks.create",{...p,patientName:"changed"},/識別碼已使用/);});
 await test("only one claim succeeds for the original version",async()=>{const t=await create();await claim(t);await rejects(C,"tasks.claim",{id:t.id,version:t.version,operatorId:C},/其他人更新/);});
 await test("volume belongs to actual performer and normal members see only themselves",async()=>{const t=await complete(await claim(await create()));assert.equal(t.operatorId,C);const stats=await rpc(A,"stats");assert.equal(stats.totalCompleted,1);assert.equal(stats.operators[0].operatorId,C);assert.equal((await rpc(B,"stats",{scope:"all"})).totalCompleted,0);assert.equal((await rpc(C,"stats")).totalCompleted,1);});
-await test("completed tasks cannot be completed or cancelled again",async()=>{const t=await complete(await claim(await create()));await rejects(A,"tasks.complete",{id:t.id,version:t.version,...report},/只有待預約/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"},/只有進行中/);});
+await test("completed tasks cannot be completed or cancelled again",async()=>{const t=await complete(await claim(await create()));await rejects(A,"tasks.complete",{id:t.id,version:t.version,...report},/只有待施打/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整"},/只有進行中/);});
 await test("cancel reason is mandatory and other needs text",async()=>{const t=await create();await rejects(A,"tasks.cancel",{id:t.id,version:t.version},/取消原因/);await rejects(A,"tasks.cancel",{id:t.id,version:t.version,reason:"其他"},/補充說明/);});
 await test("reorder retains original cancelled row and cancellation history",async()=>{const t=await create();const c=(await rpc(A,"tasks.cancel",{id:t.id,version:t.version,reason:"醫囑調整",detail:"PG取消測試"})).task;const n=await create({copiedFromTaskId:c.id});assert.equal(n.reorderOf,c.id);assert.notEqual(n.taskId,c.taskId);const old=await rpc(A,"tasks.get",{id:c.id});assert.equal(old.task.status,"cancelled");assert.equal(old.task.cancelReason,"醫囑調整");assert(old.events.some(e=>e.action==="reordered"));assert(old.events.some(e=>e.action==="cancelled"));});
 await test("operators cannot edit, remove, export or change members",async()=>{const t=await create();for(const action of["tasks.edit","tasks.remove","tasks.export","users.save"]){await rejects(B,action,{id:t.id,version:t.version},/限管理者/);}});
@@ -63,15 +63,14 @@ await test("workspace roster rename preserves existing personal account links",a
 await test("desktop shared actor cannot be counted as a clinical performer",async()=>{const t=await entryCreate();await assert.rejects(()=>workspace("tasks.claim",{id:t.id,version:t.version,operatorId:WORKSPACE}),/有效的預約施打者/);await assert.rejects(()=>workspace("users.save",{id:WORKSPACE,name:"Changed",role:"operator",enabled:false}),/共用入口不是施打成員/);});
 await test("desktop workspace does not enable LINE announcements or arbitrary functions",async()=>{for(const action of["announce","auth.login","pg_read_file"])await assert.rejects(()=>workspace(action,{}),/工作站不支援此操作/);});
 await test("disabling the desktop actor closes the full workspace without changing phone access",async()=>{await db.query("update picc_v2_private.members set enabled=false where id=$1",[WORKSPACE]);try{await assert.rejects(()=>workspace("workspace.info"),/共用工作站目前無法使用/);assert.equal((await entry("entry.info")).loginRequired,false);}finally{await db.query("update picc_v2_private.members set enabled=true where id=$1",[WORKSPACE]);}});
-await test("awaiting report survives migration, preserves audit and does not count until report completion",async()=>{
+await test("two active stages consolidate legacy report-pending cases without counting a completion",async()=>{
   let t=await claim(await create({mrn:"DEMO-AWAITING-V3"}),C);const before=(await rpc(A,"stats")).totalCompleted;
-  const stale=t.version;t=(await entry("tasks.performed",{id:t.id,version:t.version})).task;
-  assert.equal(t.status,"awaiting_report");assert.equal(t.statusLabel,"待施打回報");assert.equal((await rpc(A,"stats")).totalCompleted,before);
-  await assert.rejects(()=>entry("tasks.performed",{id:t.id,version:stale}),/其他人更新/);
+  await assert.rejects(()=>entry("tasks.performed",{id:t.id,version:t.version}),/不再設置待回報/);
+  await db.query("update picc_v2_private.tasks set status='awaiting_report' where id=$1",[t.id]);
   await db.exec(await readFile(new URL("../supabase/migrations/202610140001_picc_v2.sql",import.meta.url),"utf8"));
-  assert.equal((await entry("tasks.get",{id:t.id})).task.status,"awaiting_report");
-  assert((await entry("tasks.list",{status:"awaiting_report"})).tasks.some(x=>x.id===t.id));
-  assert((await entry("tasks.get",{id:t.id})).events.some(e=>e.action==="awaiting_report"));
+  t=(await entry("tasks.get",{id:t.id})).task;
+  assert.equal(t.status,"claimed");assert.equal(t.statusLabel,"待施打");assert.equal((await rpc(A,"stats")).totalCompleted,before);
+  assert((await entry("tasks.get",{id:t.id})).events.some(e=>e.action==="workflow_merged"));
   await assert.rejects(()=>entry("tasks.cancel",{id:t.id,version:t.version,reason:"其他"}),/補充說明/);
   t=(await entry("tasks.complete",{id:t.id,version:t.version,...report,insertionSite:"左下肢"})).task;
   assert.equal(t.insertionSite,"左下肢");assert.equal((await rpc(A,"stats")).totalCompleted,before+1);

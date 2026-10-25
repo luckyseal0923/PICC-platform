@@ -8,28 +8,28 @@ function workspace(){
   assert.match(source,/boot\(\);\s*$/);
   const context=vm.createContext({document:{addEventListener(){},querySelector(){return {addEventListener(){}};}}});
   vm.runInContext(source.replace(/boot\(\);\s*$/,''),context);
-  vm.runInContext(`state.user={id:'shared',role:'admin'};state.status='active';state.tasks=['pending','claimed','awaiting_report','completed','cancelled'].map(status=>({id:status,status,patientName:status,bedNo:'TEST',mrn:status,createdAt:new Date().toISOString()}));`,context);
+  vm.runInContext(`state.user={id:'shared',role:'admin'};state.status='active';state.tasks=['pending','claimed','completed','cancelled'].map(status=>({id:status,status,patientName:status,bedNo:'TEST',mrn:status,createdAt:new Date().toISOString()}));`,context);
   return expression=>vm.runInContext(expression,context);
 }
 test('workbench excludes completed and cancelled cases even if a stale historical filter is selected',()=>{
-  const run=workspace();assert.equal(run('visibleTasks().length'),3);
+  const run=workspace();assert.equal(run('visibleTasks().length'),2);
   assert.equal(run("state.status='completed';visibleTasks().length"),0);
-  assert.equal(run("state.status='all';visibleTasks().length"),3);
-  assert.equal(run("state.view='admin';visibleTasks().length"),5);
+  assert.equal(run("state.status='all';visibleTasks().length"),2);
+  assert.equal(run("state.view='admin';visibleTasks().length"),4);
 });
-test('full-width workbench retains its three active stages without dashboard cards or a summary sidebar',()=>{
+test('full-width workbench retains its two active stages without dashboard cards or a summary sidebar',()=>{
   const run=workspace();const html=run('renderBoard()');
   assert.match(html,/active-workbench/);assert.doesNotMatch(html,/class="metric|<aside|volume-panel|quick-panel/);
   assert.match(html,/class="workbench-table"/);assert.match(html,/<th>接單者<\/th>/);
-  const tabs=run('statusTabs()');for(const status of ['active','pending','claimed','awaiting_report'])assert.ok(tabs.includes('data-status="'+status+'"'));
+  const tabs=run('statusTabs()');for(const status of ['active','pending','claimed'])assert.ok(tabs.includes('data-status="'+status+'"'));
   assert.doesNotMatch(tabs,/data-status="(?:completed|cancelled)"/);
-  assert.match(tabs,/所有案件/);assert.match(tabs,/新開案/);assert.match(tabs,/待預約/);assert.match(tabs,/待施打回報/);
+  assert.match(tabs,/所有案件/);assert.match(tabs,/新開案/);assert.match(tabs,/待施打/);assert.doesNotMatch(tabs,/待施打回報/);
   const page=readFileSync(new URL('../static/index.html',import.meta.url),'utf8');
   assert.doesNotMatch(page,/data-view="mine"/);assert.match(page,/>案件管理<\/button>/);
 });
 test('booked and report-stage cases have one report action and no extra performed action',()=>{
   const run=workspace();
-  for(const status of ['claimed','awaiting_report']){
+  for(const status of ['claimed']){
     const html=run(`taskButtons({id:'test',status:'${status}'})`);
     assert.equal((html.match(/data-action="complete"/g)||[]).length,1);
     assert.doesNotMatch(html,/data-action="performed"/);assert.match(html,/施打回報/);
@@ -41,7 +41,7 @@ test('outcome rates use closed cases and keep active cases separate',()=>{
     {status:'cancelled',createdAt:'2026-10-01T00:00:00Z',cancelledAt:'2026-10-03T00:00:00Z',cancelReason:'等待時間過久'},
     {status:'pending',createdAt:'2026-10-01T00:00:00Z'},
     {status:'claimed',createdAt:'2026-10-01T00:00:00Z'},
-    {status:'awaiting_report',createdAt:'2026-10-01T00:00:00Z'},
+    {status:'claimed',createdAt:'2026-10-01T00:00:00Z'},
     {status:'cancelled',createdAt:'2026-10-01T00:00:00Z',deletedAt:'2026-10-04T00:00:00Z'}
   ]))`));
   assert.equal(result.total,5);assert.equal(result.closed,2);assert.equal(result.active,3);

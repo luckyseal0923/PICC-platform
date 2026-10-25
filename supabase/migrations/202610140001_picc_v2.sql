@@ -62,6 +62,18 @@ create table if not exists picc_v2_private.events (
   detail jsonb not null default '{}'::jsonb
 );
 create index if not exists picc_v2_events_idx on picc_v2_private.events(task_id,id);
+-- Preserve legacy state codes for imports, but expose only two active stages.
+-- Existing report-pending cases remain the same cases, with their assignees and clinical dates.
+with consolidated as (
+  update picc_v2_private.tasks set status='claimed',version=version+1,updated_at=clock_timestamp()
+  where status='awaiting_report' and deleted_at is null returning id
+)
+insert into picc_v2_private.events(task_id,action,actor_id,actor_name,detail)
+select id,'workflow_merged','00000000-0000-4000-8000-000000000002'::uuid,
+  '內部共用工作站（未驗證操作者）',
+  jsonb_build_object('previousStatus','awaiting_report','status','claimed','reason','進行中流程整併為新開案與待施打')
+from consolidated;
+
 create table if not exists picc_v2_private.requests (
   actor_id uuid not null references picc_v2_private.members(id),
   request_id text not null,
@@ -110,8 +122,8 @@ create or replace function picc_v2_private.task_json(t picc_v2_private.tasks)
 returns jsonb language sql stable set search_path='' as $$
   select jsonb_build_object(
     'id',t.id,'taskId',t.task_id,'patientName',t.patient_name,'bedNo',t.bed_no,'mrn',t.mrn,
-    'status',t.status,'statusLabel',case t.status when 'pending' then '新開案' when 'claimed' then '待預約'
-      when 'awaiting_report' then '待施打回報' when 'completed' then '完成' when 'cancelled' then '已取消' end,
+    'status',t.status,'statusLabel',case t.status when 'pending' then '新開案' when 'claimed' then '待施打'
+      when 'awaiting_report' then '待施打' when 'completed' then '完成' when 'cancelled' then '已取消' end,
     'createdAt',t.created_at,'createdBy',t.created_by,'claimedId',t.claimed_id,'claimedBy',coalesce((select m.name from picc_v2_private.members m where m.id=t.claimed_id),t.claimed_by),
     'claimedAt',t.claimed_at,'operatorId',t.operator_id,'operatorName',coalesce((select m.name from picc_v2_private.members m where m.id=t.operator_id),t.operator_name),'completedAt',t.completed_at,
     'difficulty',t.difficulty,'insertionSite',t.insertion_site,'vein',t.vein,'catheterType',t.catheter_type,
@@ -302,6 +314,7 @@ begin
         next_status:=case row_data->>'Status' when '待預約' then 'pending' when '待施打' then 'claimed' when '待回報' then 'awaiting_report'
           when '新開案' then 'pending' when '施打回報' then 'awaiting_report' when '待施打回報' then 'awaiting_report' when '完成' then 'completed' when '已取消' then 'cancelled' end;
       end if;
+      if next_status='awaiting_report' then next_status:='claimed'; end if;
       if next_status is null or next_status not in ('pending','claimed','awaiting_report','completed','cancelled') then raise exception '第 % 列狀態無法辨識',row_no; end if;
       created_time:=picc_v2_private.parse_time(row_data->>'起單時間');
       if created_time is null then raise exception '第 % 列缺少起單時間',row_no; end if;
@@ -347,12 +360,9 @@ begin
     if not found then raise exception '此案件已被其他人預約'; end if;
     perform picc_v2_private.audit(t.id,'claimed',actor,jsonb_build_object('operatorName',op.name));
   elsif p_action='tasks.performed' then
-    if t.status<>'claimed' then raise exception '只有待預約案件可以標記待施打回報'; end if;
-    update picc_v2_private.tasks set status='awaiting_report',updated_at=stamp,version=version+1
-      where id=t.id returning * into t;
-    perform picc_v2_private.audit(t.id,'awaiting_report',actor,jsonb_build_object('previousStatus','claimed'));
+    raise exception '請直接使用施打回報，已不再設置待回報階段';
   elsif p_action='tasks.complete' then
-    if t.status not in ('claimed','awaiting_report') then raise exception '只有待預約或待施打回報案件可以回報完成'; end if;
+    if t.status not in ('claimed','awaiting_report') then raise exception '只有待施打案件可以回報完成'; end if;
     report:=picc_v2_private.report(p_payload);
     update picc_v2_private.tasks set status='completed',operator_id=(report->>'operatorId')::uuid,
       operator_name=report->>'operatorName',completed_at=stamp,difficulty=p_payload->>'difficulty',
@@ -419,7 +429,7 @@ begin
     raise exception using errcode='42501',message='共用入口只提供建案、預約與回報操作';
   end if;
   if p_action='tasks.list' and coalesce(p_payload->>'status','') not in ('pending','claimed','awaiting_report') then
-    raise exception '請指定新開案或待預約清單'; end if;
+    raise exception '請指定新開案或待施打清單'; end if;
   return picc_v2_private.api_as(shared_actor,p_action,p_payload);
 end;
 $$;

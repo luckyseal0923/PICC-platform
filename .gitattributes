@@ -8,3 +8,6 @@ static/mobile-preview.html linguist-generated
 # The SDK contains intentional literal spaces/tabs in a JavaScript template string.
 static/supabase-adapter.js linguist-generated -whitespace
 dist/assets/supabase-adapter.js -whitespace
+
+static/workbook-export.js linguist-generated -whitespace
+dist/assets/workbook-export.js -whitespace

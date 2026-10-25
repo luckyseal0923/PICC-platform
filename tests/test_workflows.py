@@ -59,14 +59,14 @@ class PiccWorkflows(unittest.TestCase):
                                       "catheterLength": 42.5, "remark": "示範測試"},
                                 headers=self.headers)
 
-    def test_awaiting_report_is_not_counted_until_a_valid_lower_limb_report(self):
+    def test_two_active_stages_complete_directly_with_a_valid_lower_limb_report(self):
         task = self.claim(self.create()).json["task"]
         # The shared workspace has its own CSRF token.
         token = self.client.get("/api/workspace/config").json["csrf"]
         response = self.client.post(f"/api/workspace/tasks/{task['id']}/performed", json={"version": task["version"]}, headers={"X-CSRF-Token":token})
-        self.assertEqual(response.status_code, 200, response.json)
-        waiting = response.json["task"]
-        self.assertEqual(waiting["status"], "awaiting_report")
+        self.assertEqual(response.status_code, 409, response.json)
+        waiting = task
+        self.assertEqual(waiting["status"], "claimed")
         self.assertEqual(self.client.get("/api/stats").json["totalCompleted"], 0)
         for site in ("左下肢", "右下肢"):
             current = waiting if site == "左下肢" else self.claim(self.create()).json["task"]

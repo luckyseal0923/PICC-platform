@@ -26,7 +26,7 @@ if (ROOT / ".vendor").exists():
 from flask import Flask, g, jsonify, make_response, request, session, send_from_directory
 
 TAIPEI = timezone(timedelta(hours=8))
-STATUSES = {"pending": "新開案", "claimed": "待預約", "awaiting_report": "待施打回報", "completed": "完成", "cancelled": "已取消"}
+STATUSES = {"pending": "新開案", "claimed": "待施打", "awaiting_report": "待施打", "completed": "完成", "cancelled": "已取消"}
 DIFFICULTIES = ["非常簡單", "簡單", "中等", "困難", "非常困難"]
 SITES = ["右上臂", "左上臂", "左下肢", "右下肢", "其他"]
 VEINS = ["Basilic", "Cephalic", "Brachial"]
@@ -189,6 +189,21 @@ def create_app(config=None):
                          (SHARED_ENTRY_ID, SHARED_ENTRY_NAME))
             db().execute("INSERT OR IGNORE INTO users(id,name,role) VALUES(?,?,'admin')",
                          (SHARED_WORKSPACE_ID, "內部共用工作站（未驗證操作者）"))
+
+    # Consolidate the retired report-pending phase without changing clinical dates or assignees.
+    with app.app_context():
+        actor = db().execute("SELECT * FROM users WHERE id=?", (SHARED_WORKSPACE_ID,)).fetchone()
+        if actor:
+            db().execute("BEGIN IMMEDIATE")
+            try:
+                previous = db().execute("SELECT id FROM tasks WHERE status='awaiting_report' AND deleted_at IS NULL").fetchall()
+                for row in previous:
+                    db().execute("UPDATE tasks SET status='claimed',version=version+1,updated_at=? WHERE id=?", (now(),row["id"]))
+                    db().execute("INSERT INTO events(task_id,action,actor_id,actor_name,occurred_at,detail) VALUES(?,?,?,?,?,?)",(row["id"],"workflow_merged",SHARED_WORKSPACE_ID,actor["name"],now(),json.dumps({"previousStatus":"awaiting_report","status":"claimed","reason":"進行中流程整併為新開案與待施打"},ensure_ascii=False)))
+                db().execute("COMMIT")
+            except Exception:
+                db().execute("ROLLBACK")
+                raise
 
     def user():
         shared = request.path.startswith(("/api/entry/", "/api/workspace/")) and app.config["DEMO_MODE"]
@@ -474,7 +489,7 @@ def create_app(config=None):
     @app.get("/api/entry/tasks")
     def tasks():
         if request.path.startswith("/api/entry/") and request.args.get("status") not in ("pending", "claimed", "awaiting_report"):
-            raise ApiError("請指定新開案或待預約清單", 400)
+            raise ApiError("請指定新開案或待施打清單", 400)
         clauses, values = ["deleted_at IS NULL"], []
         if request.args.get("status") in STATUSES:
             clauses.append("status=?"); values.append(request.args["status"])
@@ -585,13 +600,7 @@ def create_app(config=None):
     @app.post("/api/entry/tasks/<task_id>/performed")
     @transaction
     def performed(task_id):
-        u, data, row = user(), body(), task_row(task_id)
-        checked_version(data, row)
-        if row["status"] != "claimed":
-            raise ApiError("只有待預約案件可以標記待施打回報", 409)
-        db().execute("UPDATE tasks SET status='awaiting_report',updated_at=?,version=version+1 WHERE id=?", (now(), task_id))
-        audit(task_id, "awaiting_report", u, {"previousStatus": "claimed"})
-        return jsonify(ok=True, task=task_json(task_row(task_id)))
+        raise ApiError("請直接使用施打回報，已不再設置待回報階段", 409)
 
     @app.post("/api/tasks/<task_id>/complete")
     @app.post("/api/entry/tasks/<task_id>/complete")
@@ -600,7 +609,7 @@ def create_app(config=None):
         u, data, row = user(), body(), task_row(task_id)
         checked_version(data, row)
         if row["status"] not in ("claimed", "awaiting_report"):
-            raise ApiError("只有待預約或待施打回報案件可以回報完成", 409)
+            raise ApiError("只有待施打案件可以回報完成", 409)
         report = report_values(data)
         db().execute("UPDATE tasks SET status='completed',operator_id=?,operator_name=?,completed_at=?,difficulty=?,"
                      "insertion_site=?,vein=?,catheter_type=?,catheter_length=?,remark=?,updated_at=?,"
@@ -750,7 +759,7 @@ def create_app(config=None):
                 "completed_at", "cancelled_at", "cancel_reason", "cancel_detail"]
         for row in rows:
             current = task_json(row)
-            writer.writerow([csv_safe(STATUSES[row[k]] if k == "status" else current["claimedBy"] if k == "claimed_by" else current["operatorName"] if k == "operator_name" else row[k]) for k in keys] + [row["status"]])
+            writer.writerow([csv_safe(STATUSES[row[k]] if k == "status" else current["claimedBy"] if k == "claimed_by" else current["operatorName"] if k == "operator_name" else export_local_time(row[k]) if k in ("created_at", "completed_at", "cancelled_at") else row[k]) for k in keys] + [row["status"]])
         return app.response_class("\ufeff" + output.getvalue(), mimetype="text/csv",
                                   headers={"Content-Disposition": 'attachment; filename="PICC-tasks.csv"'})
 
@@ -778,6 +787,8 @@ def create_app(config=None):
             status = text(raw.get("狀態代碼"))
             if not status:
                 status = {"待預約":"pending", "待施打":"claimed", "待回報":"awaiting_report", "新開案":"pending", "施打回報":"awaiting_report", "待施打回報":"awaiting_report", "完成":"completed", "已取消":"cancelled"}.get(raw.get("Status"))
+            if status == "awaiting_report":
+                status = "claimed"
             if status not in STATUSES:
                 status = None
             if not status:
@@ -913,6 +924,18 @@ def parse_legacy_date(value):
         return result.astimezone(timezone.utc).isoformat(timespec="seconds")
     except ValueError:
         raise ApiError("舊資料日期格式不正確，請修正後再匯入")
+
+
+def export_local_time(value):
+    if not value:
+        return ""
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=TAIPEI)
+        return stamp.astimezone(TAIPEI).strftime("%Y/%m/%d %H:%M")
+    except ValueError:
+        return ""
 
 
 def csv_safe(value):

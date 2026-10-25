@@ -170,6 +170,11 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 .workbench-table .table-actions{align-items:center;gap:5px}
 .workbench-table .table-actions .button{min-height:36px;padding:7px 10px;font-size:12px}
 .workbench-table .age-cell{font-size:13px;color:#687887}
+.case-management-table .difficulty-cell{white-space:nowrap}
+.difficulty-tag{display:inline-block;padding:5px 9px;border-radius:6px;background:#eaf3ef;color:#1b6450;font-weight:700;font-size:13px}
+.difficulty-tag.hard{background:#ffead8;color:#943a11;border:1px solid #e7aa7b}
+.difficulty-tag.missing{background:#f0f3f5;color:#75858f;font-weight:400}
+.case-management-table .remark-cell{min-width:180px;max-width:300px;white-space:normal;overflow-wrap:anywhere;line-height:1.65}
 .metrics-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
 .monthly-panels{display:grid;grid-template-columns:minmax(0,1fr);gap:24px}
 .monthly-panel{min-width:0;width:100%}

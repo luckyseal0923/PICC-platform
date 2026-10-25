@@ -3,7 +3,7 @@ import {ENTRY_ROUTES,entryPage,createEntryController} from "./entry-controller.j
 const $=selector=>document.querySelector(selector);
 const escape=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const page=entryPage(location.pathname);
-const info={create:["PICC 任務建立","填寫病人資料，建立一筆新開案案件。"],booking:["PICC 新開案清單","以下案件尚未被接單，請選擇施打人後點選「預約施打」。"],report:["PICC 施打回報","顯示待預約與待施打回報案件，完成回報後會從清單移出。"]};
+const info={create:["PICC 任務建立","填寫病人資料，建立一筆新開案案件。"],booking:["PICC 新開案清單","以下案件尚未被接單，請選擇施打人後點選「預約施打」。"],report:["PICC 施打回報","顯示待施打案件，完成回報後會從清單移出。"]};
 const state={members:[],tasks:[],selfReport:false,draft:{},original:null,activeTask:null,busy:false,initialTaskOpened:false,loadVersion:0};
 const dateFormat=new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"});
 const client=createEntryController({onUnavailable:()=>{
@@ -64,7 +64,7 @@ function waiting(task){
 function taskCard(task){
   const booking=page==="booking",date=new Date(task.createdAt);
   return '<article class="card case-card"><h3>'+escape(task.patientName)+'</h3><p class="patient-meta"><span>床號 '+escape(task.bedNo)+'</span><span>｜ 病歷號 '+escape(task.mrn)+'</span></p>'+
-    '<p class="task-number">任務編號：'+escape(task.taskId)+'</p>'+(!booking?'<span class="case-state">'+(task.status==="awaiting_report"?"待施打回報":"待預約")+'</span>':"")+
+    '<p class="task-number">任務編號：'+escape(task.taskId)+'</p>'+(!booking?'<span class="case-state">'+"待施打"+'</span>':"")+
     (!booking?'<p class="case-time">起單時間 '+(Number.isNaN(date.getTime())?'未記錄':dateFormat.format(date))+'</p><p class="assignee">接單者：'+escape(task.claimedBy||"未記錄")+'</p><p class="waiting">'+waiting(task)+'</p>':"")+
     (task.hasDifficultHistory?'<p class="difficult">曾有困難放置紀錄</p>':"")+
     (task.remark?'<p class="help">備註：'+escape(task.remark)+'</p>':"")+
@@ -73,8 +73,8 @@ function taskCard(task){
     '<div class="case-cancel"><button type="button" class="quiet-button" data-action="cancel" data-id="'+escape(task.id)+'">取消施打</button></div></article>';
 }
 function renderList(){
-  $("#entryContent").innerHTML='<div class="toolbar"><span>'+state.tasks.length+' 筆'+(page==="booking"?'新開案':'待預約／待施打回報')+'案件</span><button type="button" class="quiet-button" data-action="refresh">重新整理</button></div>'+
-    (state.tasks.length?state.tasks.map(taskCard).join(""):'<section class="card empty"><h2>目前沒有'+(page==="booking"?'新開案':'待預約／待施打回報')+'案件</h2><p>'+(page==="booking"?'新案件建立後會出現在這裡。':'預約完成後，案件會出現在這裡。')+'</p>'+link(page==="booking"?'create':'booking',page==="booking"?'PICC 建案':'前往預約施打')+'</section>');
+  $("#entryContent").innerHTML='<div class="toolbar"><span>'+state.tasks.length+' 筆'+(page==="booking"?'新開案':'待施打')+'案件</span><button type="button" class="quiet-button" data-action="refresh">重新整理</button></div>'+
+    (state.tasks.length?state.tasks.map(taskCard).join(""):'<section class="card empty"><h2>目前沒有'+(page==="booking"?'新開案':'待施打')+'案件</h2><p>'+(page==="booking"?'新案件建立後會出現在這裡。':'預約完成後，案件會出現在這裡。')+'</p>'+link(page==="booking"?'create':'booking',page==="booking"?'PICC 建案':'前往預約施打')+'</section>');
 }
 function findTask(id){const task=state.tasks.find(task=>task.id===id);if(!task)throw new Error("找不到此案件，請重新整理清單");return task;}
 function dialog(title,body){$("#dialogTitle").textContent=title;$("#dialogBody").innerHTML=body;if(!$("#entryDialog").open)$("#entryDialog").showModal();}
@@ -105,7 +105,7 @@ async function loadPage(){
     if(page==="report"&&taskId&&!state.initialTaskOpened){
       state.initialTaskOpened=true;if(!validId(taskId))throw new Error("回報連結無效");
       const selected=tasks.find(task=>task.id===taskId);
-      if(selected)openComplete(selected);else message("此案件已不在待預約清單，請確認是否已完成回報或取消。",true);
+      if(selected)openComplete(selected);else message("此案件已不在待施打清單，請確認是否已完成回報或取消。",true);
     }
   }
 }
@@ -164,13 +164,13 @@ document.addEventListener("submit",async event=>{
       if(new URLSearchParams(location.search).has("from"))history.replaceState(null,"",location.pathname);
       renderCreate();
       message(selfReport?"已完成自起單與回報，施打量已更新。":"建案成功，案件已建立。",false,
-        '<p class="receipt-details">任務編號：'+escape(task.taskId)+'</p>'+link(selfReport?'report':'booking',selfReport?'查看待預約清單':'前往預約施打'));
+        '<p class="receipt-details">任務編號：'+escape(task.taskId)+'</p>'+link(selfReport?'report':'booking',selfReport?'查看待施打清單':'前往預約施打'));
     }else if(form.dataset.form==="claim"){
       const task=await client.claim(findTask(form.dataset.id),values.operatorId);
-      await afterWrite(task,"預約完成，案件已移至待預約清單。",link("report","前往施打回報",task.id));
+      await afterWrite(task,"預約完成，案件已移至待施打清單。",link("report","前往施打回報",task.id));
     }else if(form.dataset.form==="complete"){
       const task=await client.complete(state.activeTask,values);$("#entryDialog").close();
-      await afterWrite(task,"完成回報已儲存，施打量已更新。案件已從待預約清單移除。");
+      await afterWrite(task,"完成回報已儲存，施打量已更新。案件已從待施打清單移除。");
     }else if(form.dataset.form==="cancel"){
       const task=await client.cancel(state.activeTask,values.reason,values.detail||"");
       $("#entryDialog").close();

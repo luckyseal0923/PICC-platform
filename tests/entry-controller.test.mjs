@@ -27,7 +27,7 @@ test("three entry routes request only their workflow status and omit unrelated r
   await client.boot();assert.deepEqual((await client.list("booking")).map(t=>t.id),["a"]);
   assert.equal(calls.at(-1).path,"/api/entry/tasks?status=pending");
   assert.deepEqual((await client.list("report")).map(t=>t.id),["b"]);
-  assert.equal(calls.at(-1).path,"/api/entry/tasks?status=awaiting_report");
+  assert.equal(calls.at(-1).path,"/api/entry/tasks?status=claimed");
   assert.equal(calls.some(call=>/stats|notifications|export/.test(call.path)),false);
   assert.equal(calls.some(call=>/\/auth\/|\/me$/.test(call.path)),false);
   assert.equal(client.state.actor.verified,false);
@@ -97,5 +97,5 @@ test("Supabase mode uses the same narrow entry requests and does not fall back t
   }};
   const client=createEntryController({adapter:()=>adapter,fetcher:()=>{throw new Error("unexpected local HTTP");}});
   await client.boot();assert.equal((await client.list("report")).length,1);
-  assert.equal(calls.at(-1),"/api/tasks?status=awaiting_report");assert.equal(client.loginDemo,undefined);assert.equal(client.loginLine,undefined);
+  assert.equal(calls.at(-1),"/api/tasks?status=claimed");assert.equal(client.loginDemo,undefined);assert.equal(client.loginLine,undefined);
 });

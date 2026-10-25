@@ -9,7 +9,8 @@
     "build:client": "node scripts/build-client.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.0.0"
+    "@supabase/supabase-js": "^2.0.0",
+    "exceljs": "4.4.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.0",
