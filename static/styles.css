@@ -171,6 +171,10 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 .workbench-table .table-actions .button{min-height:36px;padding:7px 10px;font-size:12px}
 .workbench-table .age-cell{font-size:13px;color:#687887}
 .case-management-table .difficulty-cell{white-space:nowrap}
+.case-management-table .performer-cell{min-width:132px;white-space:nowrap}
+.performer-name{display:inline-block;padding:5px 9px;border-radius:6px;background:#edf6f1;color:#145e50;font-size:16px;font-weight:750;line-height:1.4}
+.performer-placeholder{color:#75858f;font-size:13px}
+.performer-placeholder.missing{display:inline-block;padding:5px 8px;border-radius:6px;background:#fff2e2;color:#925217}
 .difficulty-tag{display:inline-block;padding:5px 9px;border-radius:6px;background:#eaf3ef;color:#1b6450;font-weight:700;font-size:13px}
 .difficulty-tag.hard{background:#ffead8;color:#943a11;border:1px solid #e7aa7b}
 .difficulty-tag.missing{background:#f0f3f5;color:#75858f;font-weight:400}

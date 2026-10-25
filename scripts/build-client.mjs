@@ -1,6 +1,7 @@
-import {build} from "esbuild";
+import {build,transform} from "esbuild";
 import {mkdir,copyFile,readFile,writeFile} from "node:fs/promises";
 import {createHash} from "node:crypto";
+await transform(await readFile("static/app.js","utf8"),{loader:"js",target:"es2020"});
 await build({entryPoints:["client/supabase-adapter.js"],bundle:true,format:"iife",target:["es2020"],outfile:"static/supabase-adapter.js",minify:true,legalComments:"eof"});
 await build({entryPoints:["client/entry.js"],bundle:true,format:"iife",target:["es2020"],outfile:"static/entry.js",minify:true,legalComments:"eof"});
 await build({entryPoints:["client/landing.js"],bundle:true,format:"iife",target:["es2020"],outfile:"static/landing.js",minify:true});
