@@ -153,9 +153,6 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 }
 .status.awaiting_report{background:#9b3577;color:#fff}
 .active-workbench .empty{min-height:340px}
-.status-filter{display:flex;align-items:center;gap:11px}
-.status-filter label{font-size:13px;font-weight:600;color:#405a6a;white-space:nowrap}
-.status-filter select{min-width:190px;min-height:42px;padding:8px 33px 8px 12px;border:1px solid #a8b8c3;border-radius:9px;background:#fff;color:#183b45;font-size:14px;font-weight:600}
 .workbench-table{min-width:940px;font-size:14px}
 .workbench-table th{padding:14px 13px;font-size:12px}
 .workbench-table td{padding:17px 13px;white-space:nowrap}
@@ -178,7 +175,7 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 .outcome-line strong{color:#1d6555;font-size:18px;white-space:nowrap}
 .outcome-caption{font-size:13px;color:#607585;line-height:1.8;margin:18px 0}
 @media(max-width:1100px){.outcome-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:680px){.status-filter{width:100%}.status-filter select{flex:1;min-width:0;font-size:16px}.outcome-summary{grid-template-columns:1fr}}
+@media(max-width:680px){.outcome-summary{grid-template-columns:1fr}}
 .duplicate-warning p{margin-top:7px}.duplicate-warning label{display:flex;align-items:start;gap:10px;margin-top:14px;font-size:14px;font-weight:600}
 .duplicate-warning input[type=checkbox]{width:18px;height:18px;min-height:18px;flex-shrink:0;padding:0;margin:3px 0 0;accent-color:var(--teal)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
