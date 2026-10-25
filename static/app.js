@@ -26,7 +26,7 @@ function decorate(root = document) {
   root.querySelectorAll("[data-width]").forEach(el => {el.style.width = Math.max(0, Math.min(100, +el.dataset.width))+"%";});
   root.querySelectorAll("[data-height]").forEach(el => {el.style.height = Math.max(4, Math.min(150, +el.dataset.height))+"px";});
 }
-const labels = {active:"全部案件",pending:"新開案",claimed:"待預約",awaiting_report:"待施打回報",completed:"完成",cancelled:"已取消"};
+const labels = {active:"所有案件",pending:"新開案",claimed:"待預約",awaiting_report:"待施打回報",completed:"完成",cancelled:"已取消"};
 const activeStatuses=["pending","claimed","awaiting_report"];
 const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_report:"已施打，待施打回報",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"待預約公告",announce_pending:"待預約公告"};
 const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",statsMode:"volume",outcomeStart:"",outcomeEnd:"",requestId:"",detail:null};
@@ -167,7 +167,7 @@ function metrics() {
 function renderBoard() {
   const tasks=visibleTasks();
   const rows=tasks.map(t=>'<tr data-case-status="'+esc(t.status)+'"><td class="created-cell">'+createdTime(t.createdAt)+'</td><td class="identity-cell"><strong class="mrn-number">'+esc(t.mrn)+'</strong><small class="case-number">'+esc(t.taskId)+'</small></td><td class="patient-cell"><strong>'+esc(t.patientName)+'</strong>'+(t.hasDifficultHistory?'<span class="difficult">曾有困難放置</span>':"")+'</td><td class="bed-cell">'+esc(t.bedNo)+'</td><td>'+badge(t)+'</td><td class="assignee-cell '+(!t.claimedBy?'unassigned':'')+'"><strong>'+esc(t.claimedBy||"尚未接單")+'</strong></td><td class="age-cell">'+waiting(t)+'</td><td><div class="table-actions">'+taskButtons(t)+'</div></td></tr>').join("");
-  return '<section class="panel board-panel active-workbench"><div class="panel-head"><h2>全部案件</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="table-scroll"><table class="workbench-table"><thead><tr><th>起單時間</th><th>病歷號／案件編號</th><th>病人姓名</th><th>床號</th><th>案件狀態</th><th>接單者</th><th>起單至今</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table>'+(rows?"":empty("目前沒有符合條件的進行中案件","完成與取消案件可至「全部案件」查閱。"))+'</div></section>';
+  return '<section class="panel board-panel active-workbench"><div class="panel-head"><h2>進行中案件</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="table-scroll"><table class="workbench-table"><thead><tr><th>起單時間</th><th>病歷號／案件編號</th><th>病人姓名</th><th>床號</th><th>案件狀態</th><th>接單者</th><th>起單至今</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table>'+(rows?"":empty("目前沒有符合條件的進行中案件","完成與取消案件可至「全部案件」查閱。"))+'</div></section>';
 }
 function chart(items) {
   if(!items.length)return empty("此期間沒有統計資料","可調整日期範圍。");

@@ -23,7 +23,7 @@ test('full-width workbench retains its three active stages without dashboard car
   assert.match(html,/class="workbench-table"/);assert.match(html,/<th>接單者<\/th>/);
   const tabs=run('statusTabs()');for(const status of ['active','pending','claimed','awaiting_report'])assert.ok(tabs.includes('data-status="'+status+'"'));
   assert.doesNotMatch(tabs,/data-status="(?:completed|cancelled)"/);
-  assert.match(tabs,/全部案件/);assert.match(tabs,/新開案/);assert.match(tabs,/待預約/);assert.match(tabs,/待施打回報/);
+  assert.match(tabs,/所有案件/);assert.match(tabs,/新開案/);assert.match(tabs,/待預約/);assert.match(tabs,/待施打回報/);
   const page=readFileSync(new URL('../static/index.html',import.meta.url),'utf8');
   assert.doesNotMatch(page,/data-view="mine"/);assert.match(page,/>全部案件<\/button>/);
 });
