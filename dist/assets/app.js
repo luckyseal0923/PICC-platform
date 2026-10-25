@@ -32,6 +32,12 @@ const eventLabels = {created:"建立任務",claimed:"預約施打",awaiting_repo
 const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",statsMode:"volume",outcomeStart:"",outcomeEnd:"",requestId:"",detail:null};
 const dateFormatter = new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
 function fmt(value) { if (!value) return "未記錄"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "未記錄" : dateFormatter.format(d); }
+function createdTime(value) {
+  if(!value)return "未記錄";const date=new Date(value);if(Number.isNaN(date.getTime()))return "未記錄";
+  const parts=Object.fromEntries(dateFormatter.formatToParts(date).map(part=>[part.type,part.value]));
+  const day=[parts.year,parts.month,parts.day].join("/"),time=(parts.hour==="24"?"00":parts.hour)+":"+parts.minute;
+  return '<time datetime="'+esc(value)+'"><span class="created-date">'+day+'</span><span class="created-time">'+time+'</span></time>';
+}
 function taipeiDate(d = new Date()) { return new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(d); }
 function waiting(t) { const end = t.completedAt || t.cancelledAt || new Date(); const h = Math.max(0,Math.floor((new Date(end)-new Date(t.createdAt))/3600000)); return h >= 24 ? Math.floor(h/24)+" 天 "+h%24+" 小時" : h+" 小時"; }
 function toast(message, error = false) { const el=$("#toast"); el.textContent=message; el.classList.toggle("error",error); el.hidden=false; clearTimeout(toast.timer); toast.timer=setTimeout(()=>{el.hidden=true;},5000); }
@@ -164,8 +170,8 @@ function metrics() {
 }
 function renderBoard() {
   const tasks=visibleTasks();
-  const rows=tasks.map(t=>'<tr data-case-status="'+esc(t.status)+'"><td class="identity-cell"><strong class="mrn-number">'+esc(t.mrn)+'</strong><small class="case-number">'+esc(t.taskId)+'</small></td><td class="bed-cell">'+esc(t.bedNo)+'</td><td class="patient-cell"><strong>'+esc(t.patientName)+'</strong>'+(t.hasDifficultHistory?'<span class="difficult">曾有困難放置</span>':"")+'</td><td>'+badge(t)+'</td><td class="assignee-cell '+(!t.claimedBy?'unassigned':'')+'"><strong>'+esc(t.claimedBy||"尚未接單")+'</strong></td><td class="created-cell"><time datetime="'+esc(t.createdAt||"")+'">'+fmt(t.createdAt)+'</time></td><td class="age-cell">'+waiting(t)+'</td><td><div class="table-actions">'+taskButtons(t)+'</div></td></tr>').join("");
-  return '<section class="panel board-panel active-workbench"><div class="panel-head"><h2>進行中案件</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+workbenchStatusFilter()+searchBox()+'</div><div class="table-scroll"><table class="workbench-table"><thead><tr><th>病歷號／案件編號</th><th>床號</th><th>病人姓名</th><th>狀態</th><th>接單者</th><th>起單時間</th><th>起單至今</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table>'+(rows?"":empty("目前沒有符合條件的進行中案件","完成與取消案件可至「全部案件」查閱。"))+'</div></section>';
+  const rows=tasks.map(t=>'<tr data-case-status="'+esc(t.status)+'"><td class="created-cell">'+createdTime(t.createdAt)+'</td><td class="identity-cell"><strong class="mrn-number">'+esc(t.mrn)+'</strong><small class="case-number">'+esc(t.taskId)+'</small></td><td class="patient-cell"><strong>'+esc(t.patientName)+'</strong>'+(t.hasDifficultHistory?'<span class="difficult">曾有困難放置</span>':"")+'</td><td class="bed-cell">'+esc(t.bedNo)+'</td><td>'+badge(t)+'</td><td class="assignee-cell '+(!t.claimedBy?'unassigned':'')+'"><strong>'+esc(t.claimedBy||"尚未接單")+'</strong></td><td class="age-cell">'+waiting(t)+'</td><td><div class="table-actions">'+taskButtons(t)+'</div></td></tr>').join("");
+  return '<section class="panel board-panel active-workbench"><div class="panel-head"><h2>進行中案件</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+workbenchStatusFilter()+searchBox()+'</div><div class="table-scroll"><table class="workbench-table"><thead><tr><th>起單時間</th><th>病歷號／案件編號</th><th>病人姓名</th><th>床號</th><th>案件狀態</th><th>接單者</th><th>起單至今</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table>'+(rows?"":empty("目前沒有符合條件的進行中案件","完成與取消案件可至「全部案件」查閱。"))+'</div></section>';
 }
 function chart(items) {
   if(!items.length)return empty("此期間沒有統計資料","可調整日期範圍。");
