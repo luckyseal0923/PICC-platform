@@ -13,6 +13,7 @@ const client=createEntryController({onUnavailable:()=>{
   $("#pageMessage").hidden=true;if($("#entryDialog").open)$("#entryDialog").close();
 }});
 document.body.dataset.page=page;document.title=info[page][0];
+document.querySelector('meta[name="theme-color"]').content={create:"#12665d",booking:"#8b591c",report:"#295f9d"}[page];
 $("#pageTitle").textContent=info[page][0];$("#pageDescription").textContent=info[page][1];
 
 function message(text,error=false,extra=""){

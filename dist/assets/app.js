@@ -146,14 +146,14 @@ function statusTabs() {
 function searchBox(){return '<div class="search-wrap">'+icon("search")+'<input id="taskSearch" placeholder="姓名、床號或病歷號" aria-label="搜尋案件" value="'+esc(state.query)+'"></div>';}
 function metrics() {
   const entries=[["pending","待預約","等待團隊安排","clock"],["claimed","待施打","已由團隊成員接單","user"],["completed","已完成","已完成施打回報","check"],["cancelled","已取消","保留取消原因與紀錄","close"]];
-  return '<div class="metrics">'+entries.map(([s,label,hint,i])=>'<button class="metric" data-status="'+s+'"><div class="metric-head">'+label+'<span class="metric-icon">'+icon(i)+'</span></div><div class="metric-number">'+memberTasks().filter(t=>t.status===s).length+'</div><small>'+hint+'</small></button>').join("")+'</div>';
+  return '<div class="metrics">'+entries.map(([s,label,hint,i])=>'<button class="metric" data-status="'+s+'" aria-pressed="'+(state.status===s)+'"><div class="metric-head">'+label+'<span class="metric-icon">'+icon(i)+'</span></div><div class="metric-number">'+memberTasks().filter(t=>t.status===s).length+'</div><small>'+hint+'</small></button>').join("")+'</div>';
 }
 function renderBoard() {
   const tasks=visibleTasks(),completed=memberTasks().filter(t=>t.status==="completed").length;
   const picked=state.view==="mine";
   const picker=picked?'<div class="filters"><div class="field"><label for="mineMember">施打者</label><select id="mineMember">'+userOptions(state.mineUserId)+'</select></div></div>':"";
   const list=tasks.length?tasks.map(card).join(""):empty(picked&&!state.mineUserId?"請先選擇施打者":undefined);
-  return picker+metrics()+'<div class="content-layout"><section class="panel"><div class="panel-head"><h2>'+(picked?"成員案件":"團隊案件")+'</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="task-list">'+list+'</div></section><aside class="side-stack"><section class="panel side-panel"><p class="eyebrow">PRACTICE TOTAL</p><h3>'+(picked?"此成員完成施打量":"全隊完成施打量")+'</h3><div class="side-number">'+completed+'<small>筆</small></div><p>按實際施打者計算，取消案件不納入。</p><button class="subtle-link" data-view="stats">查看施打統計 '+icon("chevron")+'</button></section><section class="panel side-panel"><p class="eyebrow">QUICK REPORT</p><h3>現場已完成施打？</h3><p class="section-spacer">自起單・自回報可直接記錄完成案件。</p><button class="button secondary" data-action="create-self">'+icon("plus")+'自起單・自回報</button></section></aside></div>';
+  return picker+metrics()+'<div class="content-layout"><section class="panel board-panel"><div class="panel-head"><h2>'+(picked?"成員案件":"團隊案件")+'</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="task-list">'+list+'</div></section><aside class="side-stack"><section class="panel side-panel volume-panel"><p class="eyebrow">PRACTICE TOTAL</p><h3>'+(picked?"此成員完成施打量":"全隊完成施打量")+'</h3><div class="side-number">'+completed+'<small>筆</small></div><p>按實際施打者計算，取消案件不納入。</p><button class="subtle-link" data-view="stats">查看施打統計 '+icon("chevron")+'</button></section><section class="panel side-panel quick-panel"><p class="eyebrow">QUICK REPORT</p><h3>現場已完成施打？</h3><p class="section-spacer">自起單・自回報可直接記錄完成案件。</p><button class="button secondary" data-action="create-self">'+icon("plus")+'自起單・自回報</button></section></aside></div>';
 }
 function chart(items) {
   if(!items.length)return empty("此期間沒有統計資料","可調整日期範圍。");
