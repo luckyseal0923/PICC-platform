@@ -177,8 +177,9 @@ async function boot(){
   try{
     await client.boot();
     const config=client.state.config;
-    $("#previewLabel").hidden=!config.demo;
+    $("#previewLabel").hidden=!(config.demo||config.trialMode);
+    if(config.trialMode)$("#previewLabel").textContent="測試環境 · 使用假資料";
     await enter();
-  }catch(error){message(error.message,true);}
+  }catch(error){$("#entryContent").hidden=true;message(error.message,true);}
 }
 boot();

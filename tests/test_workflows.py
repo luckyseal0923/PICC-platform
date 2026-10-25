@@ -14,7 +14,7 @@ from contextlib import closing
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import create_app, SHARED_ENTRY_ID
+from app import create_app, SHARED_ENTRY_ID, SHARED_WORKSPACE_ID
 
 
 class PiccWorkflows(unittest.TestCase):
@@ -68,7 +68,9 @@ class PiccWorkflows(unittest.TestCase):
 
     def test_three_mobile_entries_have_no_patient_data_before_login(self):
         anonymous = self.app.test_client()
-        self.assertEqual(anonymous.get("/").headers["Location"], "/picc-create/")
+        with anonymous.get("/") as landing:
+            self.assertEqual(landing.status_code, 200)
+            self.assertIn(b'/assets/landing.js', landing.data)
         for route in ("picc-create", "picc-booking", "picc-report"):
             for suffix in ("", "/"):
                 with anonymous.get("/" + route + suffix) as result:
@@ -124,7 +126,34 @@ class PiccWorkflows(unittest.TestCase):
         self.assertEqual(anonymous.post("/api/entry/users", json={}, headers=headers).status_code, 405)
         self.assertEqual(anonymous.delete(f"/api/entry/tasks/{task['id']}", headers=headers).status_code, 405)
         self.app.config["DEMO_MODE"] = False
-        self.assertEqual(anonymous.get("/api/entry/config").status_code, 404)
+        self.assertEqual(anonymous.get("/api/entry/config").status_code, 503)
+
+    def test_desktop_workspace_has_full_shared_features_without_login(self):
+        anonymous = self.app.test_client()
+        with anonymous.get("/workspace/") as page:
+            self.assertIn(b'id="navigation"', page.data)
+            self.assertNotIn(b'id="login"', page.data)
+        config = anonymous.get("/api/workspace/config").json
+        self.assertFalse(config["loginRequired"])
+        self.assertTrue(config["sharedWorkspace"])
+        self.assertFalse(config["user"]["verified"])
+        self.assertEqual(config["user"]["id"], SHARED_WORKSPACE_ID)
+        headers = {"X-CSRF-Token": config["csrf"]}
+        self.assertEqual(anonymous.get("/api/workspace/stats").status_code, 200)
+        members = anonymous.get("/api/workspace/users").json["users"]
+        self.assertFalse({SHARED_ENTRY_ID, SHARED_WORKSPACE_ID} & {member["id"] for member in members})
+        data = {"patientName":"DEMO desktop","bedNo":"TEST","mrn":"DEMO-DESKTOP","requestId":"workspace-request"}
+        self.assertEqual(anonymous.post("/api/workspace/tasks",json=data).status_code,403)
+        task = anonymous.post("/api/workspace/tasks",json=data,headers=headers).json["task"]
+        self.assertEqual(task["createdBy"],SHARED_WORKSPACE_ID)
+        edited = anonymous.put(f"/api/workspace/tasks/{task['id']}",json={**data,"version":task["version"],"remark":"DEMO edited"},headers=headers)
+        self.assertEqual(edited.status_code,200)
+        self.assertEqual(anonymous.get("/api/workspace/export").status_code,200)
+        response = anonymous.post("/api/workspace/users",json={"name":"DEMO new member","role":"admin","enabled":True},headers=headers)
+        self.assertEqual(response.status_code,200)
+        added = next(member for member in anonymous.get("/api/workspace/users").json["users"] if member["name"]=="DEMO new member")
+        self.assertEqual(added["role"],"operator")
+        self.assertEqual(anonymous.get("/api/workspace/auth/demo").status_code,404)
 
     def test_complete_counts_actual_performer_not_claimer(self):
         task = self.claim(self.create()).json["task"]

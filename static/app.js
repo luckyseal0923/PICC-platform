@@ -28,29 +28,33 @@ function decorate(root = document) {
 }
 const labels = {pending:"待預約",claimed:"待施打",completed:"完成",cancelled:"已取消"};
 const eventLabels = {created:"建立任務",claimed:"預約施打",completed:"完成回報",self_completed:"自起單・自回報",cancelled:"取消施打",reordered:"再次起單",reordered_created:"由取消案件重新起單",edited:"更新資料",removed:"移除案件",imported:"匯入舊資料",member_updated:"更新團隊成員",announcement_requested:"待施打公告",announce_pending:"待施打公告"};
-const state = {user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",requestId:"",detail:null};
+const state = {ready:false,mineUserId:"",user:null,csrf:"",config:{},view:"board",status:"pending",query:"",tasks:[],users:[],stats:{},page:1,pageSize:30,adminStart:"",adminEnd:"",statsStart:"",statsEnd:"",statsScope:"all",requestId:"",detail:null};
 const dateFormatter = new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
 function fmt(value) { if (!value) return "未記錄"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "未記錄" : dateFormatter.format(d); }
 function taipeiDate(d = new Date()) { return new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(d); }
 function waiting(t) { const end = t.completedAt || t.cancelledAt || new Date(); const h = Math.max(0,Math.floor((new Date(end)-new Date(t.createdAt))/3600000)); return h >= 24 ? Math.floor(h/24)+" 天 "+h%24+" 小時" : h+" 小時"; }
 function toast(message, error = false) { const el=$("#toast"); el.textContent=message; el.classList.toggle("error",error); el.hidden=false; clearTimeout(toast.timer); toast.timer=setTimeout(()=>{el.hidden=true;},5000); }
 async function api(path, options = {}) {
-  if(window.PiccSupabase?.enabled())return window.PiccSupabase.api(path,options);
+  if(window.PiccSupabase?.enabled())return window.PiccSupabase.workspaceApi(path,options);
   const headers = new Headers(options.headers || {});
   if (options.method && options.method !== "GET") headers.set("X-CSRF-Token",state.csrf);
   let body = options.body;
   if (body && !(body instanceof FormData)) {headers.set("Content-Type","application/json"); body=JSON.stringify(body);}
-  const res=await fetch(path,{...options,headers,body,credentials:"same-origin"});
+  const res=await fetch(path.replace(/^\/api\//,"/api/workspace/"),{...options,headers,body,credentials:"same-origin"});
   let data; try {data=await res.json();} catch {throw new Error("伺服器回應格式不正確，請稍後再試");}
-  if(!res.ok) {if(res.status===401 && state.user){state.user=null;$("#app").hidden=true;$("#login").hidden=false;} throw new Error(data.error || "操作未完成");}
+  if(!res.ok) {if(res.status===401 && state.user){state.user=null;state.ready=false;state.tasks=[];$("#mainContent").textContent="連線已中斷，請重新整理。";} throw new Error(data.error || "操作未完成");}
   return data;
 }
-function userOptions(id) { return state.users.filter(u=>u.enabled).map(u=>'<option value="'+esc(u.id)+'" '+(u.id===id?"selected":"")+'>'+esc(u.name)+'</option>').join(""); }
+function userOptions(id) {
+  const users=state.users.filter(u=>u.enabled),selected=users.some(u=>u.id===id);
+  return (!selected?'<option value="">請選擇施打者</option>':"")+users.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===id?"selected":"")+'>'+esc(u.name)+'</option>').join("");
+}
+function memberTasks(){return state.view==="mine"?state.tasks.filter(t=>state.mineUserId&&(t.claimedId===state.mineUserId||t.operatorId===state.mineUserId)):state.tasks;}
 function options(values,current="",placeholder="請選擇") { return '<option value="">'+placeholder+'</option>'+values.map(v=>'<option '+(v===current?"selected":"")+' value="'+esc(v)+'">'+esc(v)+'</option>').join(""); }
 function badge(t) { return '<span class="status '+esc(t.status)+'">'+esc(labels[t.status])+'</span>'; }
 function visibleTasks() {
   let tasks=state.tasks.filter(t=>state.status==="all" || t.status===state.status);
-  if(state.view==="mine") tasks=tasks.filter(t=>t.claimedId===state.user.id || t.operatorId===state.user.id);
+  if(state.view==="mine") tasks=tasks.filter(t=>state.mineUserId&&(t.claimedId===state.mineUserId||t.operatorId===state.mineUserId));
   if(state.query) {const q=state.query.toLowerCase(); tasks=tasks.filter(t=>[t.patientName,t.bedNo,t.mrn,t.taskId].some(x=>String(x||"").toLowerCase().includes(q)));}
   if(state.view==="admin") {
     if(state.adminStart) tasks=tasks.filter(t=>taipeiDate(new Date(t.createdAt))>=state.adminStart);
@@ -136,18 +140,20 @@ function card(t) {
 }
 function empty(message="目前沒有符合條件的案件",hint="試試切換狀態或搜尋條件。") {return '<div class="empty"><div class="empty-icon">'+icon("file")+'</div><h3>'+esc(message)+'</h3><p>'+esc(hint)+'</p></div>';}
 function statusTabs() {
-  let source=state.view==="mine"?state.tasks.filter(t=>t.claimedId===state.user.id || t.operatorId===state.user.id):state.tasks;
+  let source=memberTasks();
   return '<div class="tabs">'+["pending","claimed","completed","cancelled","all"].map(s=>'<button class="tab '+(state.status===s?"active":"")+'" data-status="'+s+'">'+(s==="all"?"全部":labels[s])+'<span>'+source.filter(t=>s==="all"||t.status===s).length+'</span></button>').join("")+'</div>';
 }
 function searchBox(){return '<div class="search-wrap">'+icon("search")+'<input id="taskSearch" placeholder="姓名、床號或病歷號" aria-label="搜尋案件" value="'+esc(state.query)+'"></div>';}
 function metrics() {
   const entries=[["pending","待預約","等待團隊安排","clock"],["claimed","待施打","已由團隊成員接單","user"],["completed","已完成","已完成施打回報","check"],["cancelled","已取消","保留取消原因與紀錄","close"]];
-  return '<div class="metrics">'+entries.map(([s,label,hint,i])=>'<button class="metric" data-status="'+s+'"><div class="metric-head">'+label+'<span class="metric-icon">'+icon(i)+'</span></div><div class="metric-number">'+state.tasks.filter(t=>t.status===s).length+'</div><small>'+hint+'</small></button>').join("")+'</div>';
+  return '<div class="metrics">'+entries.map(([s,label,hint,i])=>'<button class="metric" data-status="'+s+'"><div class="metric-head">'+label+'<span class="metric-icon">'+icon(i)+'</span></div><div class="metric-number">'+memberTasks().filter(t=>t.status===s).length+'</div><small>'+hint+'</small></button>').join("")+'</div>';
 }
 function renderBoard() {
-  const tasks=visibleTasks(), mineCompleted=state.tasks.filter(t=>t.status==="completed"&&t.operatorId===state.user.id).length;
-  const list=tasks.length?tasks.map(card).join(""):empty(state.view==="mine"?"目前沒有您的"+(labels[state.status]||"")+"案件":undefined);
-  return metrics()+'<div class="content-layout"><section class="panel"><div class="panel-head"><h2>'+(state.view==="mine"?"我的案件":"團隊案件")+'</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="task-list">'+list+'</div></section><aside class="side-stack"><section class="panel side-panel"><p class="eyebrow">MY PRACTICE</p><h3>我的完成施打量</h3><div class="side-number">'+mineCompleted+'<small>筆</small></div><p>按實際施打者計算，取消案件不納入。</p><button class="subtle-link" data-view="stats">查看施打統計 '+icon("chevron")+'</button></section><section class="panel side-panel"><p class="eyebrow">QUICK REPORT</p><h3>現場已完成施打？</h3><p class="section-spacer">自起單・自回報可直接記錄完成案件。</p><button class="button secondary" data-action="create-self">'+icon("plus")+'自起單・自回報</button></section>'+(state.user.role==="admin"?'<section class="panel side-panel flow-panel"><p class="eyebrow">TEAM UPDATE</p><h3>待施打清單公告</h3><p class="section-spacer">整理目前已接單案件，讓團隊同步進度。</p><button class="button secondary" data-action="announce">'+icon("bell")+'預覽公告</button></section>':'<section class="panel side-panel flow-panel"><h3>任務流程</h3><div class="flow-step"><span class="step-number">1</span><div>待預約<small>建立任務與安排施打者</small></div></div><div class="flow-step"><span class="step-number">2</span><div>待施打<small>完成施打後回報紀錄</small></div></div><div class="flow-step"><span class="step-number">3</span><div>完成<small>施打量自動計入統計</small></div></div></section>')+'</aside></div>';
+  const tasks=visibleTasks(),completed=memberTasks().filter(t=>t.status==="completed").length;
+  const picked=state.view==="mine";
+  const picker=picked?'<div class="filters"><div class="field"><label for="mineMember">施打者</label><select id="mineMember">'+userOptions(state.mineUserId)+'</select></div></div>':"";
+  const list=tasks.length?tasks.map(card).join(""):empty(picked&&!state.mineUserId?"請先選擇施打者":undefined);
+  return picker+metrics()+'<div class="content-layout"><section class="panel"><div class="panel-head"><h2>'+(picked?"成員案件":"團隊案件")+'</h2><small>'+tasks.length+' 筆案件</small></div><div class="board-toolbar">'+statusTabs()+searchBox()+'</div><div class="task-list">'+list+'</div></section><aside class="side-stack"><section class="panel side-panel"><p class="eyebrow">PRACTICE TOTAL</p><h3>'+(picked?"此成員完成施打量":"全隊完成施打量")+'</h3><div class="side-number">'+completed+'<small>筆</small></div><p>按實際施打者計算，取消案件不納入。</p><button class="subtle-link" data-view="stats">查看施打統計 '+icon("chevron")+'</button></section><section class="panel side-panel"><p class="eyebrow">QUICK REPORT</p><h3>現場已完成施打？</h3><p class="section-spacer">自起單・自回報可直接記錄完成案件。</p><button class="button secondary" data-action="create-self">'+icon("plus")+'自起單・自回報</button></section></aside></div>';
 }
 function chart(items) {
   if(!items.length)return empty("此期間沒有統計資料","可調整日期範圍。");
@@ -176,14 +182,10 @@ function renderAdmin() {
 }
 function showMember(id) {
   const u=state.users.find(u=>u.id===id)||{};
-  modal(u.id?"編輯成員":"新增團隊成員","成員須先獲得團隊授權才能登入。",
-  '<form data-form="member" data-id="'+esc(u.id||"")+'"><div class="form-grid">'+field("姓名","name",u.name,"text",true,true)+
-  '<div class="field"><label for="f-role">角色</label><select name="role" id="f-role"><option value="operator">施打者</option><option value="admin" '+(u.role==="admin"?"selected":"")+'>管理者</option></select></div><div class="field"><label for="f-enabled">使用權限</label><select name="enabled" id="f-enabled"><option value="true">啟用</option><option value="false" '+(u.enabled===0?"selected":"")+'>停用</option></select></div>'+
-  (state.config.backend==="supabase"?field("Supabase 登入使用者 ID","authUserId",u.auth_user_id,"text",false,true):"")+
-  field("LINE 使用者 ID（後續綁定）","lineId",u.line_id,"text",false,true)+'</div>'+formActions("儲存成員")+'</form>');
+  modal(u.id?"編輯施打者":"新增施打者","名單用於預約及實際施打者選擇。",'<form data-form="member" data-id="'+esc(u.id||"")+'"><input type="hidden" name="role" value="'+esc(u.role||"operator")+'"><div class="form-grid">'+field("姓名","name",u.name,"text",true,true)+'<div class="field full"><label for="f-enabled">名單狀態</label><select id="f-enabled" name="enabled"><option value="true">啟用</option><option value="false" '+(u.enabled===0?"selected":"")+'>停用</option></select></div></div>'+formActions("儲存施打者")+'</form>');
 }
 function renderMembers() {
-  return '<div class="filters"><button class="button primary" data-action="member">'+icon("plus")+'新增成員</button></div><div class="member-grid">'+state.users.map(u=>'<article class="member-card"><span class="avatar">'+esc(u.name.slice(0,1))+'</span><h3>'+esc(u.name)+'</h3><small>'+(u.role==="admin"?"管理者":"施打者")+' · '+(u.enabled?"啟用":"停用")+'</small><button class="button secondary" data-action="member" data-id="'+esc(u.id)+'">管理成員權限</button></article>').join("")+'</div>';
+  return '<div class="filters"><button class="button primary" data-action="member">'+icon("plus")+'新增施打者</button></div><div class="member-grid">'+state.users.map(u=>'<article class="member-card"><span class="avatar">'+esc(u.name.slice(0,1))+'</span><h3>'+esc(u.name)+'</h3><small>'+(u.enabled?"啟用":"停用")+'</small><button class="button secondary" data-action="member" data-id="'+esc(u.id)+'">編輯施打者</button></article>').join("")+'</div>';
 }
 async function renderNotifications() {
   const data=await api("/api/notifications");
@@ -191,7 +193,7 @@ async function renderNotifications() {
   const status={simulated:"示範紀錄（未發送）",queued:"待發送",sent:"服務確認送出",failed:"發送未完成",sending:"發送中"};
   return '<div class="alert info-alert">案件寫入與通知結果分開記錄。通知未完成時可重試，無需重複建立或回報案件。</div><section class="panel"><div class="panel-head"><h2>LINE 通知紀錄</h2><button class="button secondary small-button" data-action="announce">預覽待施打公告</button></div><div class="table-scroll"><table><thead><tr><th>時間</th><th>通知事件</th><th>操作人</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+data.notifications.map(n=>'<tr><td>'+fmt(n.created_at)+'</td><td>'+esc(eventLabels[n.event]||n.event)+'</td><td>'+esc(n.actor_name)+'</td><td>'+esc(status[n.status]||n.status)+(n.last_error?'<small>'+esc(n.last_error)+'</small>':"")+'</td><td>'+((n.status==="queued"||n.status==="failed")?'<button class="button secondary small-button" data-action="retry" data-id="'+n.id+'">重試通知</button>':"—")+'</td></tr>').join("")+'</tbody></table>'+(data.notifications.length?"":empty("還沒有通知紀錄","新增或更新案件後會顯示於此。"))+'</div></section>';
 }
-const viewInfo={board:["TEAM WORKSPACE","工作台","待預約、待施打與完成回報，在同一處掌握。"],mine:["MY WORKSPACE","我的案件","查看您接單與完成施打的案件。"],stats:["PRACTICE INSIGHTS","施打統計","按實際施打者與完成日期，掌握個別施打量。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","管理 LINE 帳號的使用權限與角色。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
+const viewInfo={board:["TEAM WORKSPACE","工作台","待預約、待施打與完成回報，在同一處掌握。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PRACTICE INSIGHTS","施打統計","按實際施打者與完成日期，掌握個別施打量。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
 let renderVersion=0;
 async function render() {
   const version=++renderVersion, info=viewInfo[state.view];
@@ -220,8 +222,9 @@ async function refresh() {
 }
 async function enter(data) {
   state.user=data.user;state.csrf=data.csrf;
-  $("#login").hidden=true;$("#app").hidden=false;$("#demoBanner").hidden=!state.config.demo;
-  $("#profileName").textContent=state.user.name;$("#profileInitial").textContent=state.user.name.slice(0,1);$("#profileRole").textContent=state.user.role==="admin"?"管理者":"施打者";
+  $("#app").hidden=false;$("#demoBanner").hidden=!(state.config.demo||state.config.trialMode);
+  if(state.config.trialMode)$("#demoBanner").textContent="測試環境 · 使用假資料";
+  $("#profileName").textContent="PICC 團隊";$("#profileInitial").textContent="P";$("#profileRole").textContent="共用工作站";
   document.querySelectorAll(".admin-only").forEach(el=>{el.hidden=state.user.role!=="admin";});
   state.view="board";state.status="pending";
   const today=taipeiDate();state.statsStart=today.slice(0,8)+"01";state.statsEnd=today;state.statsScope=state.user.role==="admin"?"all":"mine";
@@ -248,7 +251,7 @@ const actions={
   "all-stats":async()=>{state.statsStart="";state.statsEnd="";state.statsScope=$("#statsScope")?.value||"mine";await render();},
   "filter-admin":()=>{const start=$("#adminStart").value,end=$("#adminEnd").value;if(start&&end&&start>end)throw new Error("開始日期不能晚於結束日期");state.adminStart=start;state.adminEnd=end;state.page=1;return render();},
   "prev-page":()=>{state.page--;return render();},"next-page":()=>{state.page++;return render();},
-  "export-tasks":async()=>{const q=new URLSearchParams();if(state.adminStart)q.set("start",state.adminStart);if(state.adminEnd)q.set("end",state.adminEnd);if(!window.PiccSupabase?.enabled()){window.location.href="/api/export?"+q;return;}const data=await api("/api/export?"+q);const keys=["createdAt","taskId","patientName","bedNo","mrn","statusLabel","claimedBy","operatorName","catheterType","catheterLength","insertionSite","vein","difficulty","remark","completedAt","cancelledAt","cancelReason","cancelDetail"];downloadCSV([["起單時間","任務編號","病人姓名","床號","病歷號","Status","接單者","施打者","管路種類","管路長度(cm)","部位","血管","困難度","備註","完成時間","取消時間","取消原因","取消說明"],...data.tasks.map(t=>keys.map(k=>t[k]??""))],"PICC-案件.csv");},
+  "export-tasks":async()=>{const q=new URLSearchParams();if(state.adminStart)q.set("start",state.adminStart);if(state.adminEnd)q.set("end",state.adminEnd);if(!window.PiccSupabase?.enabled()){window.location.href="/api/workspace/export?"+q;return;}const data=await api("/api/export?"+q);const keys=["createdAt","taskId","patientName","bedNo","mrn","statusLabel","claimedBy","operatorName","catheterType","catheterLength","insertionSite","vein","difficulty","remark","completedAt","cancelledAt","cancelReason","cancelDetail"];downloadCSV([["起單時間","任務編號","病人姓名","床號","病歷號","Status","接單者","施打者","管路種類","管路長度(cm)","部位","血管","困難度","備註","完成時間","取消時間","取消原因","取消說明"],...data.tasks.map(t=>keys.map(k=>t[k]??""))],"PICC-案件.csv");},
   "export-stats":()=>downloadCSV([["統計起日","統計迄日","施打者","完成量","困難／非常困難量"],...(state.stats.operators||[]).map(o=>[state.statsStart||"不限",state.statsEnd||"不限",o.operatorName,o.count,o.difficultCount])],"PICC-施打量.csv"),
   retry:async id=>{const result=await api("/api/notifications/"+id+"/retry",{method:"POST",body:{}});toast(result.simulated?"示範紀錄，不會發送 LINE":"通知服務已確認送出");await render();}
 };
@@ -258,7 +261,7 @@ document.addEventListener("click",async e=>{
     if(target.dataset.view){const view=target.dataset.view;if(["admin","members","notifications"].includes(view)&&state.user.role!=="admin")return;state.view=view;state.status=view==="mine"?"claimed":view==="admin"?"all":"pending";state.query="";state.page=1;await render();}
     else if(target.dataset.status){state.status=target.dataset.status;state.page=1;await render();}
     else if(target.dataset.action){const action=actions[target.dataset.action];if(action)await action(target.dataset.id);}
-    else if(target.dataset.user){target.disabled=true;try{await enter(await api("/api/auth/demo",{method:"POST",body:{userId:target.dataset.user}}));}finally{target.disabled=false;}}
+
   } catch(error) {toast(error.message,true);}
 });
 document.addEventListener("input",e=>{
@@ -283,28 +286,19 @@ document.addEventListener("submit",async e=>{
   finally{submit.disabled=false;submit.textContent=initial;}
 });
 $("#newTask").addEventListener("click",()=>showCreate());
-$("#refresh").addEventListener("click",()=>refresh().catch(e=>toast(e.message,true)));
-$("#logout").addEventListener("click",async()=>{try{await api("/api/auth/logout",{method:"POST",body:{}});state.user=null;state.csrf="";state.tasks=[];$("#app").hidden=true;$("#login").hidden=false;}catch(e){toast(e.message,true);}});
-$("#mobileLogout").addEventListener("click",()=>$("#logout").click());
-$("#lineLogin").addEventListener("click",async()=>{
-  const button=$("#lineLogin");button.disabled=true;
-  try {
-    if(!state.config.lineReady)throw new Error("新版 LINE 登入尚待設定。");
-    if(window.PiccSupabase?.enabled()){await window.PiccSupabase.signInWithLine();return;}
-    if(!window.liff) {await new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="https://static.line-scdn.net/liff/edge/2/sdk.js";script.onload=resolve;script.onerror=reject;document.head.appendChild(script);});}
-    await liff.init({liffId:state.config.liffId});
-    if(!liff.isLoggedIn()){liff.login({redirectUri:window.location.origin+"/workspace/"});return;}
-    const idToken=liff.getIDToken();if(!idToken)throw new Error("LINE 未提供登入資訊，請確認已授予登入權限。");
-    await enter(await api("/api/auth/line",{method:"POST",body:{idToken}}));
-  }catch(e){$("#loginMessage").textContent=e.message||"LINE 登入未完成";}
-  finally{button.disabled=false;}
-});
+$("#refresh").addEventListener("click",()=>state.ready?refresh().catch(e=>toast(e.message,true)):window.location.reload());
+document.addEventListener("change",e=>{if(e.target.id==="mineMember"){state.mineUserId=e.target.value;state.page=1;render().catch(error=>toast(error.message,true));}});
 async function boot(){
-  decorate();state.config=await api("/api/config");$("#demoLogin").hidden=!state.config.demo;
-  $("#supabaseTestLogin").hidden=!state.config.testAuthEnabled;
-  if(state.config.demo)$("#loginBadge").textContent="LOCAL PREVIEW · 示範資料";
-  if(!state.config.lineReady){$("#lineLogin").disabled=true;$("#loginMessage").textContent="新版 LINE 登入尚待設定"+(state.config.demo?"，可先使用下方測試身分。":"。");}
-  try{await enter(await api("/api/me"));}catch(error){if(state.user)throw error;if(window.PiccSupabase?.enabled()&&error.message!=="請先登入")$("#loginMessage").textContent=error.message;}
+  if(window.matchMedia("(max-width:680px)").matches){window.location.replace("/picc-create/");return;}
+  decorate();document.querySelectorAll(".nav-link").forEach(button=>{button.disabled=true;});
+  try{
+    state.config=await api("/api/config");
+    if(state.config.loginRequired!==false||!state.config.user?.id)throw new Error("工作站尚未完成啟用，請聯絡管理者。");
+    await enter({user:state.config.user,csrf:state.config.csrf||""});state.ready=true;
+    document.querySelectorAll(".nav-link").forEach(button=>{button.disabled=false;});$("#newTask").disabled=false;
+  }catch(error){
+    state.ready=false;$("#newTask").disabled=true;
+    $("#mainContent").innerHTML='<section class="panel"><div class="panel-body"><h2>目前無法讀取資料</h2><p class="muted section-spacer">'+esc(error.message)+'</p><p class="muted section-spacer">可使用右上角重新整理，或聯絡管理者完成系統設定。</p></div></section>';
+  }
 }
-$("#supabaseTestLogin").addEventListener("submit",async e=>{e.preventDefault();const button=e.target.querySelector('button[type="submit"]');button.disabled=true;try{await enter(await window.PiccSupabase.signInWithPassword($("#testEmail").value,$("#testPassword").value));$("#testPassword").value="";}catch(error){$("#loginMessage").textContent=error.message;}finally{button.disabled=false;}});
-boot().catch(error=>{$("#loginMessage").textContent=error.message;});
+boot();

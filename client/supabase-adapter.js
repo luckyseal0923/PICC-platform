@@ -30,11 +30,13 @@ export function parseCSV(input){
   return rows.map((values,index)=>{if(values.length!==headers.length)throw new Error("第 "+(index+2)+" 列欄位數不正確");return Object.fromEntries(headers.map((h,i)=>[h,values[i]]));});
 }
 
-export function isSharedEntryPath(path){return path==="/"||/^\/picc-(create|booking|report)(\/|$)/.test(path)||path==="/assets/mobile-preview.html";}
+export function isSharedEntryPath(path){return path==="/"||/^\/workspace\/?$/.test(path)||/^\/picc-(create|booking|report)(\/|$)/.test(path)||path==="/assets/mobile-preview.html";}
 export function createAdapter(client,config,base="http://localhost",entryClient=client){
   async function rpc(action,payload={},shared=false){
-    const {data,error}=await (shared?entryClient:client).rpc(shared?"picc_v2_entry_api":"picc_v2_api",{p_action:action,p_payload:payload});
+    const name=shared==="workspace"?"picc_v2_workspace_api":shared?"picc_v2_entry_api":"picc_v2_api";
+    const {data,error}=await (shared?entryClient:client).rpc(name,{p_action:action,p_payload:payload});
     if(error){
+      if(error.code==="PGRST202")throw new Error("系統尚未完成啟用，請聯絡管理者。");
       if(error.code==="22P02")throw new Error("資料格式不正確，請確認後再試");
       if(error.code==="23514"||error.code==="23502")throw new Error("請檢查必填欄位與資料長度");
       if(error.code==="23503")throw new Error("登入使用者 ID 不存在，請確認成員的 Supabase 帳號");
@@ -50,9 +52,26 @@ export function createAdapter(client,config,base="http://localhost",entryClient=
   }
   return {
     enabled:()=>true,
+    async workspaceApi(path,options={}){
+      const url=new URL(path,base),method=options.method||"GET",payload={...Object.fromEntries(url.searchParams),...(options.body instanceof FormData?{}:options.body||{})};
+      const workspaceRpc=(action,body=payload)=>rpc(action,body,"workspace");
+      if(url.pathname==="/api/config")return {demo:false,trialMode:Boolean(config.trialMode),backend:"supabase",appName:"picc-v2",notificationsEnabled:false,...enums,...await workspaceRpc("workspace.info",{})};
+      if(url.pathname==="/api/users")return workspaceRpc(method==="GET"?"users.list":"users.save");
+      if(url.pathname==="/api/stats")return workspaceRpc("stats");
+      if(url.pathname==="/api/export")return workspaceRpc("tasks.export");
+      if(url.pathname==="/api/import"){
+        const file=options.body.get("file");if(!file||file.size>2*1024*1024)throw new Error("請選擇 2 MB 以下的 UTF-8 CSV");
+        return workspaceRpc("tasks.import",{rows:parseCSV(await file.text())});
+      }
+      if(url.pathname==="/api/notifications")return workspaceRpc("notifications.list",{});
+      if(url.pathname==="/api/tasks")return workspaceRpc(method==="GET"?"tasks.list":"tasks.create");
+      const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|complete|cancel))?$/);
+      if(match){payload.id=decodeURIComponent(match[1]);return workspaceRpc("tasks."+(match[2]||(method==="GET"?"get":method==="PUT"?"edit":method==="DELETE"?"remove":"unsupported")));}
+      throw new Error("工作站不支援此操作");
+    },
     async entryApi(path,options={}){
       const url=new URL(path,base),method=options.method||"GET",payload={...Object.fromEntries(url.searchParams),...(options.body||{})};
-      if(url.pathname==="/api/config")return {demo:false,backend:"supabase",appName:"picc-v2",notificationsEnabled:false,...enums,...await rpc("entry.info",{},true)};
+      if(url.pathname==="/api/config")return {demo:false,trialMode:Boolean(config.trialMode),backend:"supabase",appName:"picc-v2",notificationsEnabled:false,...enums,...await rpc("entry.info",{},true)};
       if(url.pathname==="/api/users"&&method==="GET")return rpc("users.list",{},true);
       if(url.pathname==="/api/tasks"&&["GET","POST"].includes(method))return rpc(method==="GET"?"tasks.list":"tasks.create",payload,true);
       const match=url.pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(claim|complete|cancel))?$/);
@@ -113,7 +132,10 @@ function rejectPrivilegedKey(key){
 }
 if(typeof window!=="undefined"){
   window.PiccSupabase={enabled:()=>false};
-  if(config.supabaseUrl&&config.supabaseAnonKey){
+  if(config.setupError){
+    const fail=async()=>{throw new Error(config.setupError);};
+    window.PiccSupabase={enabled:()=>true,api:fail,entryApi:fail,workspaceApi:fail};
+  }else if(config.supabaseUrl&&config.supabaseAnonKey){
     try{
       rejectPrivilegedKey(config.supabaseAnonKey);
       const url=new URL(config.supabaseUrl);
@@ -126,7 +148,7 @@ if(typeof window!=="undefined"){
       });
       window.PiccSupabase=createAdapter(client,config,window.location.origin,entryClient);
     }catch(error){
-      window.PiccSupabase={enabled:()=>true,api:async()=>{throw error;},entryApi:async()=>{throw error;}};
+      window.PiccSupabase={enabled:()=>true,api:async()=>{throw error;},entryApi:async()=>{throw error;},workspaceApi:async()=>{throw error;}};
     }
   }
 }

@@ -17,11 +17,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from urllib import request as urlrequest, parse as urlparse, error as urlerror
+from runtime_settings import public_settings, public_env_file, connection_sources
 
 ROOT = Path(__file__).resolve().parent
 if (ROOT / ".vendor").exists():
     sys.path.insert(0, str(ROOT / ".vendor"))
-from flask import Flask, g, jsonify, redirect, request, session, send_from_directory
+from flask import Flask, g, jsonify, make_response, request, session, send_from_directory
 
 TAIPEI = timezone(timedelta(hours=8))
 STATUSES = {"pending": "待預約", "claimed": "待施打", "completed": "完成", "cancelled": "已取消"}
@@ -32,6 +33,8 @@ CATHETERS = ["雙腔PICC", "單腔PICC"]
 CANCEL_REASONS = ["暫不需要施打", "醫囑調整", "病人因素", "其他"]
 SHARED_ENTRY_ID = "00000000-0000-4000-8000-000000000001"
 SHARED_ENTRY_NAME = "內部共用入口（未驗證操作者）"
+SHARED_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002"
+SHARED_IDS = (SHARED_ENTRY_ID, SHARED_WORKSPACE_ID)
 
 
 class ApiError(Exception):
@@ -59,6 +62,8 @@ def create_app(config=None):
     demo = os.environ.get("PICC_DEMO") == "1"
     app.config.update(
         DEMO_MODE=demo,
+        SUPABASE_PUBLIC_URL=os.environ.get("SUPABASE_URL", os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")),
+        SUPABASE_PUBLIC_KEY=os.environ.get("SUPABASE_ANON_KEY", os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")),
         DATABASE=str(ROOT / os.environ.get("PICC_DATABASE", f"instance/picc{'-demo' if demo else ''}.sqlite3")),
         LIFF_ID=os.environ.get("PICC_LIFF_ID", ""),
         LINE_CHANNEL_ID=os.environ.get("LINE_LOGIN_CHANNEL_ID", ""),
@@ -72,6 +77,10 @@ def create_app(config=None):
     )
     if config:
         app.config.update(config)
+    if not app.config["DEMO_MODE"] and not app.config.get("TESTING"):
+        local_public = public_env_file(ROOT / ".env.local")
+        app.config["SUPABASE_PUBLIC_URL"] = app.config["SUPABASE_PUBLIC_URL"] or local_public.get("SUPABASE_URL", local_public.get("NEXT_PUBLIC_SUPABASE_URL", ""))
+        app.config["SUPABASE_PUBLIC_KEY"] = app.config["SUPABASE_PUBLIC_KEY"] or local_public.get("SUPABASE_ANON_KEY", local_public.get("NEXT_PUBLIC_SUPABASE_ANON_KEY", ""))
     db_path = Path(app.config["DATABASE"])
     db_path.parent.mkdir(parents=True, exist_ok=True)
     secret_file = db_path.parent / ".session-secret"
@@ -145,11 +154,14 @@ def create_app(config=None):
         if app.config["DEMO_MODE"]:
             db().execute("INSERT OR IGNORE INTO users(id,name,role) VALUES(?,?,'operator')",
                          (SHARED_ENTRY_ID, SHARED_ENTRY_NAME))
+            db().execute("INSERT OR IGNORE INTO users(id,name,role) VALUES(?,?,'admin')",
+                         (SHARED_WORKSPACE_ID, "內部共用工作站（未驗證操作者）"))
 
     def user():
-        shared = request.path.startswith("/api/entry/") and app.config["DEMO_MODE"]
+        shared = request.path.startswith(("/api/entry/", "/api/workspace/")) and app.config["DEMO_MODE"]
+        shared_id = SHARED_WORKSPACE_ID if request.path.startswith("/api/workspace/") else SHARED_ENTRY_ID
         row = db().execute("SELECT * FROM users WHERE id=? AND enabled=1",
-                           (SHARED_ENTRY_ID if shared else session.get("uid"),)).fetchone()
+                           (shared_id if shared else session.get("uid"),)).fetchone()
         if not row:
             if shared:
                 raise ApiError("共用入口目前無法使用，請重新整理", 503)
@@ -175,14 +187,14 @@ def create_app(config=None):
             or request.host.split(":")[0] not in ("localhost", "127.0.0.1", "[")
         ):
             raise ApiError("示範模式只允許本機使用", 403)
-        shared = request.path.startswith("/api/entry/")
+        shared = request.path.startswith(("/api/entry/", "/api/workspace/"))
         if shared and not app.config["DEMO_MODE"]:
-            raise ApiError("本機共用入口 API 未啟用；正式版使用 Supabase 共用入口", 404)
-        public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/entry/config")
+            raise ApiError("系統尚未完成連線設定，請聯絡管理者或重新整理後再試。", 503)
+        public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/entry/config", "/api/workspace/config")
         if request.path.startswith("/api/") and request.path not in public:
             user()
             if request.method not in ("GET", "HEAD", "OPTIONS"):
-                csrf_key = "entry_csrf" if shared else "csrf"
+                csrf_key = "workspace_csrf" if request.path.startswith("/api/workspace/") else "entry_csrf" if shared else "csrf"
                 if not session.get(csrf_key) or not hmac.compare_digest(
                     request.headers.get("X-CSRF-Token", ""), session[csrf_key]
                 ):
@@ -197,10 +209,14 @@ def create_app(config=None):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
+        try:
+            supabase_sources = " ".join(connection_sources(browser_settings()))
+        except ValueError:
+            supabase_sources = ""
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self' https://static.line-scdn.net; "
             "style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.line.me "
-            "https://access.line.me https://liff.line.me https://static.line-scdn.net; "
+            "https://access.line.me https://liff.line.me https://static.line-scdn.net " + supabase_sources + "; "
             "frame-src https://access.line.me https://liff.line.me; "
             "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
         )
@@ -222,7 +238,22 @@ def create_app(config=None):
 
     @app.get("/")
     def index():
-        return redirect("/picc-create/")
+        return send_from_directory(ROOT / "static", "landing.html")
+
+    def browser_settings():
+        return public_settings((ROOT / "static/config.js").read_text(encoding="utf-8"),
+                               app.config["SUPABASE_PUBLIC_URL"], app.config["SUPABASE_PUBLIC_KEY"])
+
+    @app.get("/assets/config.js")
+    def runtime_browser_config():
+        try:
+            settings = browser_settings()
+        except ValueError:
+            settings = {"setupError": "系統連線設定不正確，請聯絡管理者。"}
+        response = make_response("window.PICC_CONFIG = " + json.dumps(settings, ensure_ascii=True) + ";\n")
+        response.mimetype = "application/javascript"
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/workspace")
     @app.get("/workspace/")
@@ -262,6 +293,16 @@ def create_app(config=None):
                        accessMode="shared", notificationsEnabled=False,
                        user={"id": u["id"], "name": u["name"], "role": "shared", "verified": False},
                        csrf=session["entry_csrf"], cancelReasons=CANCEL_REASONS,
+                       difficulties=DIFFICULTIES, sites=SITES, veins=VEINS, catheters=CATHETERS)
+
+    @app.get("/api/workspace/config")
+    def workspace_config():
+        session.setdefault("workspace_csrf", secrets.token_urlsafe(32))
+        u = user()
+        return jsonify(appName="picc-v2", backend="demo", demo=True, loginRequired=False,
+                       sharedWorkspace=True, notificationsEnabled=False,
+                       user={"id": u["id"], "name": u["name"], "role": "admin", "verified": False},
+                       csrf=session["workspace_csrf"], cancelReasons=CANCEL_REASONS,
                        difficulties=DIFFICULTIES, sites=SITES, veins=VEINS, catheters=CATHETERS)
 
     def sign_in(u):
@@ -349,8 +390,8 @@ def create_app(config=None):
         return result
 
     def operator(body_data):
-        row = db().execute("SELECT * FROM users WHERE id=? AND id<>? AND enabled=1",
-                           (body_data.get("operatorId"), SHARED_ENTRY_ID)).fetchone()
+        row = db().execute("SELECT * FROM users WHERE id=? AND id NOT IN (?,?) AND enabled=1",
+                           (body_data.get("operatorId"), *SHARED_IDS)).fetchone()
         if not row:
             raise ApiError("請選擇有效的施打者")
         return row
@@ -559,7 +600,7 @@ def create_app(config=None):
     @app.get("/api/entry/users")
     def users():
         u = user()
-        rows = db().execute("SELECT * FROM users WHERE id<>? ORDER BY role,name", (SHARED_ENTRY_ID,)).fetchall()
+        rows = db().execute("SELECT * FROM users WHERE id NOT IN (?,?) ORDER BY role,name", SHARED_IDS).fetchall()
         return jsonify(users=[{k: row[k] for k in
                                (("id", "name", "role", "enabled", "line_id") if u["role"] == "admin"
                                 else ("id", "name", "role", "enabled"))} for row in rows])
@@ -575,8 +616,14 @@ def create_app(config=None):
         enabled = 1 if data.get("enabled", True) else 0
         line_id = text(data.get("lineId"), 100)
         uid = text(data.get("id")) or str(uuid.uuid4())
-        if uid == SHARED_ENTRY_ID:
+        if uid in SHARED_IDS:
             raise ApiError("共用入口不是施打成員，無需編輯")
+        previous = db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        if request.path.startswith("/api/workspace/"):
+            role = previous["role"] if previous else "operator"
+            line_id = previous["line_id"] if previous else None
+        elif "lineId" not in data and previous:
+            line_id = previous["line_id"]
         if uid == u["id"] and (not enabled or role != "admin"):
             raise ApiError("不能停用或移除自己的管理者權限")
         if not app.config["DEMO_MODE"] and not line_id:
@@ -674,7 +721,7 @@ def create_app(config=None):
             if status == "completed" and not completed:
                 missing += 1
             op_name = text(raw.get("施打者"))
-            op_rows = db().execute("SELECT id FROM users WHERE name=? AND id<>?", (op_name, SHARED_ENTRY_ID)).fetchall()
+            op_rows = db().execute("SELECT id FROM users WHERE name=? AND id NOT IN (?,?)", (op_name, *SHARED_IDS)).fetchall()
             op_id = op_rows[0]["id"] if len(op_rows) == 1 else None
             try:
                 length = float(raw["管路長度(cm)"]) if raw.get("管路長度(cm)") else None
@@ -767,6 +814,14 @@ def create_app(config=None):
                     except ApiError:
                         pass
             time.sleep(15)
+    workspace_views = {"tasks", "detail", "create_task", "claim", "complete", "cancel",
+                       "edit_task", "delete_task", "users", "save_user", "stats", "export",
+                       "import_csv", "notifications"}
+    for rule in list(app.url_map.iter_rules()):
+        if rule.rule.startswith("/api/") and not rule.rule.startswith("/api/entry/") and rule.endpoint in workspace_views:
+            app.add_url_rule("/api/workspace/" + rule.rule[len("/api/"):],
+                             endpoint="workspace_" + rule.endpoint, view_func=app.view_functions[rule.endpoint],
+                             methods=sorted(rule.methods - {"HEAD", "OPTIONS"}))
     app.notification_worker = notification_worker
     return app
 

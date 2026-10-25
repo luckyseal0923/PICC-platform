@@ -40,5 +40,9 @@ assert.equal(sharedCalls.at(-1).name,"picc_v2_entry_api");assert.equal(sharedCal
 for(const path of ["/api/me","/api/stats","/api/export","/api/auth/demo"])await assert.rejects(()=>sharedAdapter.entryApi(path),/只提供建案/);
 await assert.rejects(()=>sharedAdapter.entryApi("/api/users",{method:"POST",body:{}}),/只提供建案/);
 for(const path of ["/picc-create/","/picc-booking","/picc-report/","/assets/mobile-preview.html"])assert.equal(isSharedEntryPath(path),true);
-assert.equal(isSharedEntryPath("/"),true);assert.equal(isSharedEntryPath("/workspace/"),false);
+assert.equal(isSharedEntryPath("/"),true);assert.equal(isSharedEntryPath("/workspace/"),true);
+await sharedAdapter.workspaceApi("/api/config");assert.equal(sharedCalls.at(-1).name,"picc_v2_workspace_api");assert.equal(sharedCalls.at(-1).p_action,"workspace.info");
+await sharedAdapter.workspaceApi("/api/stats");assert.equal(sharedCalls.at(-1).p_action,"stats");
+await sharedAdapter.workspaceApi("/api/users",{method:"POST",body:{name:"DEMO",role:"operator"}});assert.equal(sharedCalls.at(-1).p_action,"users.save");
+await assert.rejects(()=>sharedAdapter.workspaceApi("/api/auth/demo"),/不支援此操作/);
 console.log("Shared entry adapter: no personal auth, separate public client/RPC, and no admin operations passed.");

@@ -1,9 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createEntryController,entryPage,ENTRY_ROUTES} from "../client/entry-controller.js";
+import {defaultRoute} from "../client/landing.js";
 
 const response=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{"Content-Type":"application/json"}});
 const shared={id:"00000000-0000-4000-8000-000000000001",name:"共用入口",role:"shared",verified:false};
+test("home routes desktop to the full workspace and phone to the create entry",()=>{
+  assert.equal(defaultRoute(390),"/picc-create/");assert.equal(defaultRoute(680),"/picc-create/");
+  assert.equal(defaultRoute(681),"/workspace/");assert.equal(defaultRoute(1920),"/workspace/");
+});
 function scenario(handler,{config={},unavailable=()=>{}}={}){
   const calls=[];let sequence=0;
   const client=createEntryController({uuid:()=>"request-"+(++sequence),onUnavailable:unavailable,adapter:()=>null,

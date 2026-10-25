@@ -2,7 +2,9 @@
 
 院內 PICC 建案、預約施打與施打回報平台。新版以 Supabase 作為正式資料後端；本機提供獨立的假資料預覽，n8n 的 LINE 群組通知留待後續串接。
 
-## 三個手機入口
+## 首頁與三個手機入口
+
+網域根目錄 `/` 依畫面寬度分流：電腦開啟完整的 `/workspace/`，手機（寬度 680 px 以下）開啟 `/picc-create/`。直接使用以下三個網址時，會保留各自的簡易操作畫面。
 
 | 網址路徑 | 內容 |
 | --- | --- |
@@ -10,7 +12,7 @@
 | `/picc-booking/` | 只列待預約案件，選擇施打人後預約；可取消施打。 |
 | `/picc-report/` | 只列待施打案件，顯示接單者與等待時間；在同頁完成回報或取消。 |
 
-**三個入口不需要個人登入或身分認證。** 開啟後直接操作，施打者由下拉名單選擇。操作歷程記為「內部共用入口（未驗證操作者）」；個人施打量依選定的實際施打者與完成日期計算。
+**手機入口與電腦工作站均不需要個人登入或身分認證。** 開啟後直接操作，施打者由下拉名單選擇。操作歷程分別記為「內部共用入口（未驗證操作者）」與「內部共用工作站（未驗證操作者）」；個人施打量依選定的實際施打者與完成日期計算。電腦版包含案件看板、成員案件、施打統計、案件管理、CSV 匯入／匯出與成員名單。
 
 取消會保留原單、原因與時間。需要再次施打時建立新單，連結原取消案件，原單不會重新開啟。統計使用臺灣時間；舊資料缺少完成日期時會保留「未記錄」，不以起單日期代替。
 
@@ -30,10 +32,10 @@ npm run build:client
 
 在 **Windows 檔案總管**雙擊 `開啟新版網站.cmd`。在程式編輯器點該檔案只會顯示內容，不會執行。
 
-- 預設開啟：[PICC 建案](http://127.0.0.1:8765/picc-create/)
+- 預設開啟：[PICC 平台首頁](http://127.0.0.1:8765/)，電腦自動進入完整工作站。
 - [預約施打](http://127.0.0.1:8765/picc-booking/)
 - [施打回報](http://127.0.0.1:8765/picc-report/)
-- [完整管理工作站](http://127.0.0.1:8765/workspace/)：管理與統計，保留管理者權限；本機可選示範管理者。
+- [完整管理工作站](http://127.0.0.1:8765/workspace/)：共用管理與統計，無個人登入。
 
 測試後執行 `停止新版網站.cmd`，假資料會保留。Python 預覽只綁定這台電腦的 `127.0.0.1`；手機無法直接使用這個本機網址。
 
@@ -51,23 +53,17 @@ python app.py --demo --port 8765
 - `supabase/migrations/202610140001_picc_v2.sql`：資料表、狀態轉換、稽核、統計、權限與共用入口 API。
 - `app.py`：本機示範伺服器，使用獨立 SQLite 假資料庫；正式版直接串接 Supabase，不需要用 Python 取代 Supabase。
 
-Supabase 共用入口使用 `public.picc_v2_entry_api`，僅提供名單、建案、待預約／待施打清單、預約、回報與取消。完整管理 API 使用 `public.picc_v2_api`，保留個別權限。兩者共用同一個資料庫交易引擎，避免重複計量與競爭接單。
+Supabase 手機入口使用 `public.picc_v2_entry_api`，僅提供名單、建案、待預約／待施打清單、預約、回報與取消。完整工作站使用 `public.picc_v2_workspace_api`，提供案件管理、統計、成員維護與 CSV。舊的個人帳號 API `public.picc_v2_api` 保留相容，但目前畫面不使用。所有入口共用同一個資料庫交易引擎，避免重複計量與競爭接單。
 
-### 正式串接步驟
+### Coolify 串接步驟
 
 1. 在 PICC-booking 專用資料庫套用 SQL migration。它使用獨立的 `picc_v2_private` schema，不修改舊 MySQL 或 n8n。
-2. 於新版成員表建立施打者名單。這些施打者可以只有姓名，不需要 LINE 或 Supabase Auth 帳號。例如：
+2. 在 Coolify 的 **PICC-Platform 網站 application** 加入 `NEXT_PUBLIC_SUPABASE_URL` 與 `NEXT_PUBLIC_SUPABASE_ANON_KEY`，設為 Runtime 可用。也接受 `SUPABASE_URL`／`SUPABASE_ANON_KEY` 別名。這些是前端公開連線設定，**不要填 service-role／secret key**。本機非示範模式可讀取被 Git 忽略的 `.env.local`；它不會提交到 GitHub。
+3. 執行 `npm ci`、`npm run build:client`，重新部署網站。Python 服務的 `/assets/config.js` 在執行時產生設定，並將指定的 Supabase 網域加入瀏覽器連線政策；不必把 key 寫進程式庫。若改採純靜態 `dist/` 部署，則需先在 `static/config.js` 設定公開值後重新建置。
+4. 在電腦工作站的「團隊成員」建立施打者名單，只需姓名與啟用狀態，不需要 LINE 或 Supabase Auth 帳號。
+5. 先用假資料驗證建案 → 預約 → 回報、取消 → 重新建案與施打量。目前 `trialMode: true` 會顯示測試標示；備份還原與院內存取限制需另外驗收。
 
-   ```sql
-   insert into picc_v2_private.members(name, role)
-   values ('施打者甲', 'operator');
-   ```
-
-3. 在 `static/config.js` 填入確認過的 Supabase API URL 與公開 anon／publishable key。**不要填 service-role／secret key。** 本版本的 key 保持空白。
-4. 執行 `npm run build:client`，將 `dist/` 部署到院內受限的網站環境。各頁適用放在網域根目錄；本專案尚未設定 GitHub Pages 發布。
-5. 在實際環境用假資料驗證建案 → 預約 → 回報、取消 → 重新建案、施打量與備份還原。
-
-**免登入入口的存取範圍依賴網路限制。** 正式病人資料應置於院內網路或 VPN 的限制範圍，前端與 Supabase API 都必須受限；只有公開網址或把連結留在群組，不能限制外部存取。本次僅上傳程式碼，沒有套用遠端 SQL、部署網站、匯入病人資料或啟用 LINE 通知。
+**免登入入口的存取範圍依賴網路限制。** 正式病人資料應置於院內網路或 VPN 的限制範圍，前端與 Supabase API 都必須受限；只有公開網址或把連結留在群組，不能限制外部存取。此階段僅供假資料驗收，LINE 通知尚未啟用。
 
 ## 測試
 
@@ -75,7 +71,7 @@ Supabase 共用入口使用 `public.picc_v2_entry_api`，僅提供名單、建�
 npm run test:entries
 node tests/adapter.test.mjs
 npm run test:supabase
-python -m unittest discover -s tests -p test_workflows.py -v
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 測試範圍：

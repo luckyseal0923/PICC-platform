@@ -18,6 +18,9 @@ create table if not exists picc_v2_private.members (
 insert into picc_v2_private.members(id,name,role)
 values('00000000-0000-4000-8000-000000000001','內部共用入口（未驗證操作者）','operator')
 on conflict(id) do nothing;
+insert into picc_v2_private.members(id,name,role)
+values('00000000-0000-4000-8000-000000000002','內部共用工作站（未驗證操作者）','admin')
+on conflict(id) do nothing;
 create table if not exists picc_v2_private.tasks (
   id uuid primary key default gen_random_uuid(),
   task_id text not null unique,
@@ -116,7 +119,7 @@ returns jsonb language plpgsql stable set search_path='' as $$
 declare op picc_v2_private.members; n numeric;
 begin
   select * into op from picc_v2_private.members where id=(p_data->>'operatorId')::uuid and enabled
-    and id<>'00000000-0000-4000-8000-000000000001'::uuid;
+    and id not in ('00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid);
   if op.id is null then raise exception '請選擇有效的實際施打者'; end if;
   if coalesce(p_data->>'difficulty','') not in ('非常簡單','簡單','中等','困難','非常困難') then
     raise exception '請選擇放置困難度'; end if;
@@ -157,20 +160,21 @@ begin
     select coalesce(jsonb_agg(jsonb_build_object('id',m.id,'name',m.name,'role',m.role,'enabled',case when m.enabled then 1 else 0 end)
       ||case when actor.role='admin' then jsonb_build_object('line_id',m.line_user_id,'auth_user_id',m.auth_user_id) else '{}'::jsonb end
       order by m.role,m.name),'[]'::jsonb) into result from picc_v2_private.members m
-      where m.id<>'00000000-0000-4000-8000-000000000001'::uuid;
+      where m.id not in ('00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid);
     return jsonb_build_object('users',result);
   elsif p_action='users.save' then
     name_value:=trim(p_payload->>'name');
     if coalesce(name_value,'')='' or p_payload->>'role' not in ('admin','operator') then raise exception '請填寫姓名與有效角色'; end if;
     member_id:=coalesce(nullif(p_payload->>'id','')::uuid,gen_random_uuid());
-    if member_id='00000000-0000-4000-8000-000000000001'::uuid then
+    if member_id in ('00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid) then
       raise exception '共用入口不是施打成員，無需編輯'; end if;
     if member_id=actor.id and (not coalesce((p_payload->>'enabled')::boolean,true) or p_payload->>'role'<>'admin') then
       raise exception '不能停用或移除自己的管理者權限'; end if;
     if member_id=actor.id and nullif(p_payload->>'authUserId','')::uuid is distinct from actor.auth_user_id then
       raise exception '不能修改自己的登入使用者 ID'; end if;
     insert into picc_v2_private.members(id,auth_user_id,line_user_id,name,role,enabled)
-    values(member_id,nullif(p_payload->>'authUserId','')::uuid,nullif(trim(p_payload->>'lineId'),''),name_value,
+    values(member_id,case when p_payload?'authUserId' then nullif(p_payload->>'authUserId','')::uuid else (select m.auth_user_id from picc_v2_private.members m where m.id=member_id) end,
+      case when p_payload?'lineId' then nullif(trim(p_payload->>'lineId'),'') else (select m.line_user_id from picc_v2_private.members m where m.id=member_id) end,name_value,
       p_payload->>'role',coalesce((p_payload->>'enabled')::boolean,true))
     on conflict(id) do update set auth_user_id=excluded.auth_user_id,line_user_id=excluded.line_user_id,
       name=excluded.name,role=excluded.role,enabled=excluded.enabled;
@@ -271,7 +275,7 @@ begin
       completed_time:=picc_v2_private.parse_time(row_data->>'完成時間');
       select case when count(*)=1 then (array_agg(id))[1] end into legacy_operator
         from picc_v2_private.members where name=trim(row_data->>'施打者')
-          and id<>'00000000-0000-4000-8000-000000000001'::uuid;
+          and id not in ('00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid);
       if next_status='completed' and completed_time is null then missing:=coalesce(missing,0)+1; end if;
       insert into picc_v2_private.tasks(task_id,patient_name,bed_no,mrn,status,created_at,created_by,claimed_by,
         operator_id,operator_name,completed_at,difficulty,insertion_site,vein,catheter_type,catheter_length,remark,
@@ -303,7 +307,7 @@ begin
   if p_action='tasks.claim' then
     if t.status<>'pending' then raise exception '此案件已被預約或已結案'; end if;
     select * into op from picc_v2_private.members where id=(p_payload->>'operatorId')::uuid and enabled
-      and id<>'00000000-0000-4000-8000-000000000001'::uuid;
+      and id not in ('00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid);
     if op.id is null then raise exception '請選擇有效的預約施打者'; end if;
     update picc_v2_private.tasks set status='claimed',claimed_id=op.id,claimed_by=op.name,claimed_at=stamp,
       updated_at=stamp,version=version+1 where id=t.id and status='pending' and version=t.version returning * into t;
@@ -331,7 +335,7 @@ begin
       mrn=trim(p_payload->>'mrn'),remark=coalesce(p_payload->>'remark',''),updated_at=stamp,version=version+1 where id=t.id;
     if t.status='claimed' and nullif(p_payload->>'claimedId','') is not null then
       select * into op from picc_v2_private.members where id=(p_payload->>'claimedId')::uuid and enabled
-        and id<>'00000000-0000-4000-8000-000000000001'::uuid;
+        and id not in ('00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid);
       if op.id is null then raise exception '請選擇有效的接單者'; end if;
       update picc_v2_private.tasks set claimed_id=op.id,claimed_by=op.name where id=t.id;
     end if;
@@ -381,11 +385,42 @@ begin
   return picc_v2_private.api_as(shared_actor,p_action,p_payload);
 end;
 $$;
+-- The complete desktop workspace is shared within the private hospital network.
+-- Do not activate this anonymous management API on an unrestricted public database endpoint.
+create or replace function public.picc_v2_workspace_api(p_action text,p_payload jsonb default '{}'::jsonb)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare actor picc_v2_private.members; result jsonb; existing_role text; clean jsonb:=p_payload;
+begin
+  select * into actor from picc_v2_private.members where id='00000000-0000-4000-8000-000000000002'::uuid
+    and enabled and role='admin' and auth_user_id is null;
+  if actor.id is null then raise exception '共用工作站目前無法使用'; end if;
+  if p_action='workspace.info' then
+    return jsonb_build_object('loginRequired',false,'sharedWorkspace',true,'csrf','',
+      'user',jsonb_build_object('id',actor.id,'name',actor.name,'role','admin','verified',false));
+  end if;
+  if p_action is null or p_action not in ('users.list','users.save','stats','tasks.list','tasks.get','tasks.create',
+    'tasks.claim','tasks.complete','tasks.cancel','tasks.edit','tasks.remove','tasks.export','tasks.import','notifications.list') then
+    raise exception '工作站不支援此操作'; end if;
+  if p_action='users.save' then
+    select m.role into existing_role from picc_v2_private.members m where m.id=nullif(p_payload->>'id','')::uuid;
+    clean:=(p_payload-'authUserId'-'lineId')||jsonb_build_object('role',coalesce(existing_role,'operator'));
+  end if;
+  result:=picc_v2_private.api_as(actor,p_action,clean);
+  if p_action='users.list' then
+    select coalesce(jsonb_agg(member-'auth_user_id'-'line_id'),'[]'::jsonb) into clean
+      from jsonb_array_elements(result->'users') member;
+    result:=jsonb_set(result,'{users}',clean);
+  end if;
+  return result;
+end;
+$$;
 revoke all on all functions in schema picc_v2_private from public,anon,authenticated;
 revoke all on function public.picc_v2_api(text,jsonb) from public,anon,authenticated;
 grant execute on function public.picc_v2_api(text,jsonb) to authenticated;
 revoke all on function public.picc_v2_entry_api(text,jsonb) from public,anon,authenticated;
 grant execute on function public.picc_v2_entry_api(text,jsonb) to anon,authenticated;
+revoke all on function public.picc_v2_workspace_api(text,jsonb) from public,anon,authenticated;
+grant execute on function public.picc_v2_workspace_api(text,jsonb) to anon,authenticated;
 comment on function public.picc_v2_api(text,jsonb) is 'PICC v2 authenticated team API. All writes are transactional and audited; LINE notifications are deferred.';
 notify pgrst, 'reload schema';
 commit;

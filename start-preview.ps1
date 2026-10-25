@@ -28,5 +28,5 @@ if (-not $piccReady) {
     }
 }
 if (-not $piccReady) { throw 'Preview did not become ready.' }
-if (-not $NoBrowser) { Start-Process -FilePath ($piccUrl + '/picc-create/') }
+if (-not $NoBrowser) { Start-Process -FilePath $piccUrl }
 Write-Output 'PICC preview is ready. All preview records are synthetic.'
