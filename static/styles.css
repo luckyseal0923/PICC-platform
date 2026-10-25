@@ -174,14 +174,24 @@ dialog{width:min(680px,calc(100% - 32px));max-height:92vh;max-height:92dvh;paddi
 .monthly-panels{display:grid;grid-template-columns:minmax(0,1fr);gap:24px}
 .monthly-panel{min-width:0;width:100%}
 .monthly-chart-scroll{overflow-x:auto;overscroll-behavior-x:contain}
-.monthly-chart{min-width:840px;min-height:250px;gap:16px;padding:26px 8px 12px}
-.monthly-chart .chart-column{min-width:46px;font-size:13px}
-.monthly-chart .chart-column strong{font-size:15px}
-.monthly-chart .chart-bar{width:min(58px,78%);background:#287b66}
-.monthly-chart.created-series .chart-bar{background:#3979b8}
-.monthly-chart .zero-month .chart-bar{height:2px!important;min-height:2px;opacity:.35}
-.monthly-chart .outside-period .chart-bar{visibility:hidden}
+.monthly-chart{min-width:840px;min-height:250px;padding:28px 8px 12px 34px}
+.monthly-plot{position:relative;height:180px;border-bottom:1px solid #c8d5dd}
+.monthly-bar-row{position:absolute;inset:0;display:flex;gap:16px}
+.monthly-bar-column{position:relative;display:flex;flex:1;min-width:46px;align-items:flex-end;justify-content:center}
+.monthly-bar{width:min(58px,78%);min-height:4px;border-radius:6px 6px 0 0;background:#287b66}
+.created-series .monthly-bar{background:#3979b8}
+.monthly-count{position:absolute;left:0;right:0;text-align:center;transform:translateY(-5px);font-size:15px;font-weight:650;color:#315c50;z-index:3}
+.monthly-month-row{display:flex;gap:16px;margin-top:12px;color:#607585;font-size:13px}
+.monthly-month-row>span{flex:1;min-width:46px;text-align:center}
+.monthly-chart .zero-month .monthly-bar{height:2px!important;min-height:2px;opacity:.35}
+.monthly-chart .outside-period .monthly-bar{visibility:hidden}
 .monthly-chart .outside-period{opacity:.5}
+.monthly-target{position:absolute;left:0;right:0;border-top:2px dashed #a76122;z-index:2;pointer-events:none}
+.monthly-target>span{position:absolute;right:calc(100% + 9px);top:-12px;color:#8e4e17;font-size:12px;font-weight:650}
+.monthly-axis-top,.monthly-axis-zero{position:absolute;right:calc(100% + 9px);font-size:12px;color:#738695}
+.monthly-axis-top{top:-10px}.monthly-axis-zero{bottom:-10px}
+.monthly-goal-legend{display:flex;align-items:center;gap:9px;color:#8e4e17;font-size:13px;font-weight:600}
+.monthly-goal-legend>span{width:30px;border-top:2px dashed #a76122}
 .chart-caption{margin:10px 0 26px;color:#607585;font-size:12px}
 .timeliness-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}
 .outcome-line{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 0;border-bottom:1px solid #e5ecef;color:#526c7c;font-size:14px}

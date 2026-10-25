@@ -24,7 +24,9 @@ const icon = name => '<svg viewBox="0 0 24 24" aria-hidden="true">'+(icons[name]
 function decorate(root = document) {
   root.querySelectorAll("[data-icon]").forEach(el => {el.innerHTML = icon(el.dataset.icon);});
   root.querySelectorAll("[data-width]").forEach(el => {el.style.width = Math.max(0, Math.min(100, +el.dataset.width))+"%";});
-  root.querySelectorAll("[data-height]").forEach(el => {el.style.height = Math.max(4, Math.min(150, +el.dataset.height))+"px";});
+  root.querySelectorAll("[data-height]").forEach(el => {el.style.height = Math.max(4, Math.min(180, +el.dataset.height))+"px";});
+  root.querySelectorAll("[data-bottom]").forEach(el => {el.style.bottom = Math.max(0, Math.min(100, +el.dataset.bottom))+"%";});
+  root.querySelectorAll("[data-chart-width]").forEach(el => {el.style.minWidth = Math.max(840, +el.dataset.chartWidth)+"px";});
 }
 const labels = {active:"所有案件",pending:"新開案",claimed:"待預約",awaiting_report:"待施打回報",completed:"完成",cancelled:"已取消"};
 const activeStatuses=["pending","claimed","awaiting_report"];
@@ -203,12 +205,11 @@ function metricMonthDomain(){
   return months;
 }
 function metricMonthChart(items,kind){
-  const months=metricMonthDomain(),counts=new Map(items.map(row=>[row.month,Number(row.count)||0])),max=Math.max(1,...counts.values()),singleYear=months.length===12;
-  return '<div class="monthly-chart-scroll"><div class="chart monthly-chart '+kind+'">'+months.map(month=>{
-    const outside=(state.statsStart&&month<state.statsStart.slice(0,7))||(state.statsEnd&&month>state.statsEnd.slice(0,7)),count=counts.get(month)||0;
-    const label=singleYear?Number(month.slice(5))+"月":month.replace("-","/");
-    return '<div class="chart-column '+(outside?'outside-period':count===0?'zero-month':'')+'" title="'+month+'：'+(outside?'不在統計期間':count+' 件')+'"><strong>'+(outside?'—':count)+'</strong><div class="chart-bar" data-height="'+Math.round(count/max*150)+'"></div><span>'+label+'</span></div>';
-  }).join("")+'</div></div>';
+  const target=20,plotHeight=180,months=metricMonthDomain(),counts=new Map(items.map(row=>[row.month,Number(row.count)||0])),singleYear=months.length===12;
+  const peak=Math.max(0,...[...(state.stats.months||[]),...(state.stats.createdMonths||[])].map(row=>Number(row.count)||0)),max=Math.ceil(Math.max(target*1.25,peak*1.1)/5)*5;
+  const rows=months.map(month=>{const outside=Boolean((state.statsStart&&month<state.statsStart.slice(0,7))||(state.statsEnd&&month>state.statsEnd.slice(0,7))),count=counts.get(month)||0;return {month,outside,count,label:singleYear?Number(month.slice(5))+"月":month.replace("-","/")};});
+  const bars=rows.map(row=>'<div class="monthly-bar-column '+(row.outside?'outside-period':row.count===0?'zero-month':'')+'" title="'+row.month+'：'+(row.outside?'不在統計期間':row.count+' 件；每月基本量 '+target+' 件')+'"><strong class="monthly-count" data-bottom="'+(row.count/max*100)+'">'+(row.outside?'—':row.count)+'</strong><div class="monthly-bar" data-height="'+Math.round(row.count/max*plotHeight)+'"></div></div>').join("");
+  return '<div class="monthly-goal-legend"><span aria-hidden="true"></span>每月基本量 '+target+' 件</div><div class="monthly-chart-scroll"><div class="monthly-chart '+kind+'" data-chart-width="'+(months.length*70+44)+'"><div class="monthly-plot"><span class="monthly-axis-top">'+max+'</span><span class="monthly-axis-zero">0</span><div class="monthly-target" data-bottom="'+(target/max*100)+'" aria-label="每月基本量 '+target+' 件"><span>'+target+'</span></div><div class="monthly-bar-row">'+bars+'</div></div><div class="monthly-month-row">'+rows.map(row=>'<span class="'+(row.outside?'outside-period':'')+'">'+row.label+'</span>').join("")+'</div></div></div>';
 }
 function renderStats() {
   const s=state.stats,operators=s.operators||[],total=s.totalCompleted||0,difficult=operators.reduce((sum,row)=>sum+row.difficultCount,0);
