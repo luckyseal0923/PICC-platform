@@ -26,10 +26,16 @@ function options(values,current="",placeholder="請選擇"){
 function memberOptions(current="",placeholder="請選擇施打人"){
   return '<option value="">'+escape(placeholder)+'</option>'+state.members.map(member=>'<option value="'+escape(member.id)+'"'+(member.id===current?' selected':'')+'>'+escape(member.name)+'</option>').join("");
 }
+function reportTimeValue(value=new Date()){
+  const date=new Date(value);if(Number.isNaN(date.getTime()))return "";
+  const parts=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(date).map(part=>[part.type,part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
 function reportFields(values={},task=null){
   const config=client.state.config,operator=values.operatorId||task?.operatorId||task?.claimedId||"";
   const select=(label,name,choices)=>'<label for="'+name+'">'+label+' *</label><select id="'+name+'" name="'+name+'" required>'+options(choices,values[name]||"")+'</select>';
-  return '<fieldset class="report-fields"><legend>施打紀錄</legend><label for="operatorId">實際施打者 *</label><select id="operatorId" name="operatorId" required>'+memberOptions(operator,"請選擇實際施打者")+'</select><p class="help">施打量依實際施打者與完成日期計算。</p>'+
+  return '<fieldset class="report-fields"><legend>施打紀錄</legend><label for="operatorId">實際施打者 *</label><select id="operatorId" name="operatorId" required>'+memberOptions(operator,"請選擇實際施打者")+'</select>'+
+    '<label for="completedAt">施打時間（臺灣時間） *</label><input id="completedAt" name="completedAt" type="datetime-local" step="60" required value="'+escape(values.completedAt||reportTimeValue(task?.completedAt||new Date()))+'"><p class="help">預設為目前時間，可調整為實際施打時間。施打量依實際施打者與此日期計算。</p>'+
     select("放置困難度","difficulty",config.difficulties)+select("施打位置","insertionSite",config.sites)+
     select("血管","vein",config.veins)+select("管路類型","catheterType",config.catheters)+
     '<label for="catheterLength">管路長度（cm，選填）</label><input id="catheterLength" name="catheterLength" type="number" min="0.01" step="any" inputmode="decimal" value="'+escape(values.catheterLength||"")+'"></fieldset>';

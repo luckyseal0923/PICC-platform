@@ -135,6 +135,35 @@ await test("new CSV state codes and legacy labels retain distinct booking meanin
 await test("anonymous users cannot consume the private monthly counter",async()=>{
   await assert.rejects(()=>db.transaction(async tx=>{await tx.exec('set local role anon');return tx.query('select picc_v2_private.next_case_number(now())');}),/permission denied/);
 });
+await test("reported procedure time is Taipei-local, determines the statistics month, and preserves the server audit time",async()=>{
+ const t=await claim(await create(),C);const before=(await rpc(A,'stats')).months.find(m=>m.month==='2026-09')?.count||0;
+ const done=await complete(t,{completedAt:'2026-09-30T23:45'});
+ assert.equal(new Date(done.completedAt).toISOString(),'2026-09-30T15:45:00.000Z');
+ assert.equal((await rpc(A,'stats')).months.find(m=>m.month==='2026-09').count,before+1);
+ const audit=(await rpc(A,'tasks.get',{id:done.id})).events.find(e=>e.action==='completed');
+ assert.equal(new Date(audit.detail.completedAt).getTime(),new Date(done.completedAt).getTime());
+ assert.equal(new Date(audit.detail.reportedAt).getTime(),new Date(done.updatedAt).getTime());
+ assert.notEqual(new Date(audit.occurredAt).getTime(),new Date(done.completedAt).getTime());
+});
+await test("self-report accepts a backdated actual time without backdating creation or claim time",async()=>{
+ const t=await entryCreate({...report,selfReport:true,completedAt:'2026-09-30T16:05:00Z'});
+ assert.equal(new Date(t.completedAt).toISOString(),'2026-09-30T16:05:00.000Z');
+ assert.notEqual(new Date(t.createdAt).getTime(),new Date(t.completedAt).getTime());
+ assert.equal(new Date(t.claimedAt).getTime(),new Date(t.createdAt).getTime());
+});
+await test("omitted procedure time defaults to server now and invalid times do not complete a case",async()=>{
+ const t=await claim(await create(),C);
+ for(const completedAt of ['not-a-date','infinity'])await rejects(A,'tasks.complete',{id:t.id,version:t.version,...report,completedAt},/日期格式|施打時間格式/);
+ assert.equal((await rpc(A,'tasks.get',{id:t.id})).task.status,'claimed');
+ const before=Date.now(),done=await complete(t);
+ assert(Math.abs(new Date(done.completedAt).getTime()-before)<5000);
+});
+await test("incremental report-time migration is repeatable and preserves all stored cases",async()=>{
+ const before=(await db.query('select * from picc_v2_private.tasks order by id')).rows;
+ const migration=await readFile(new URL('../supabase/migrations/202610260002_report_completion_time.sql',import.meta.url),'utf8');
+ await db.exec(migration);await db.exec(migration);
+ assert.deepEqual((await db.query('select * from picc_v2_private.tasks order by id')).rows,before);
+});
 console.log("Supabase SQL:",results.length,"passed");
 }catch(error){process.exitCode=1;console.error(error.stack);}
 finally{await mkdir(new URL("../verification/",import.meta.url),{recursive:true});await writeFile(new URL("../verification/supabase-tests.json",import.meta.url),JSON.stringify({engine:"PGlite PostgreSQL",passed:results.filter(r=>r.passed).length,total:results.length,scope:"SQL and role behavior locally; not remote Supabase, not native multi-connection load testing",results},null,2));await db.close();}

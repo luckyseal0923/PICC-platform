@@ -80,9 +80,15 @@ function modal(title, subtitle, body) {
 function field(label,name,value="",type="text",required=false,full=false) {
   return '<div class="field '+(full?"full":"")+'"><label for="f-'+name+'">'+label+(required?' <b>＊</b>':'')+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+(required?"required":"")+' '+(type==="number"?'min="0.01" step="any"':'maxlength="100"')+'></div>';
 }
-function reportFields(t={}) {
+function reportTimeValue(value=new Date()) {
+  const date=new Date(value);if(Number.isNaN(date.getTime()))return "";
+  const parts=Object.fromEntries(dateFormatter.formatToParts(date).map(part=>[part.type,part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+function reportFields(t={},includeTime=true) {
   return '<div class="form-section"><h3>施打紀錄</h3><div class="form-grid">'+
-  '<div class="field full"><label for="f-operatorId">實際施打者 <b>＊</b></label><select name="operatorId" id="f-operatorId" required>'+userOptions(t.operatorId || t.claimedId || state.user.id)+'</select><small>施打量依這位成員與完成日期計算。</small></div>'+
+  '<div class="field full"><label for="f-operatorId">實際施打者 <b>＊</b></label><select name="operatorId" id="f-operatorId" required>'+userOptions(t.operatorId || t.claimedId || state.user.id)+'</select><small>施打量依這位成員與施打日期計算。</small></div>'+
+  (includeTime?field("施打時間（臺灣時間）","completedAt",reportTimeValue(t.completedAt||new Date()),"datetime-local",true,true)+'<p class="muted full">預設為目前時間，可調整為實際施打時間。</p>':"")+
   '<div class="field"><label for="f-difficulty">放置困難度 <b>＊</b></label><select name="difficulty" id="f-difficulty" required>'+options(state.config.difficulties,t.difficulty)+'</select></div>'+
   '<div class="field"><label for="f-insertionSite">施打位置 <b>＊</b></label><select name="insertionSite" id="f-insertionSite" required>'+options(state.config.sites,t.insertionSite)+'</select></div>'+
   '<div class="field"><label for="f-vein">血管 <b>＊</b></label><select name="vein" id="f-vein" required>'+options(state.config.veins,t.vein)+'</select></div>'+
@@ -123,9 +129,9 @@ function showReorder(id) {
 }
 function showEdit(id) {
   const t=findTask(id); state.detail=t;
-  const completionValue=t.completedAt?taipeiDate(new Date(t.completedAt))+"T"+new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Taipei",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(t.completedAt)):"";
+  const completionValue=t.completedAt?reportTimeValue(t.completedAt):"";
   const assigned=t.status==="claimed"?'<div class="field section-spacer"><label for="f-claimedId">調整接單者</label><select id="f-claimedId" name="claimedId">'+userOptions(t.claimedId)+'</select></div>':"";
-  const reported=t.status==="completed"?'<div class="section-spacer"><label><input type="checkbox" id="editReportToggle" name="editReport" value="true"> 同時修正施打紀錄</label><p class="muted">原施打者：'+esc(t.operatorName||"未記錄")+'。僅修改基本資料不會改變施打量。</p><fieldset id="editReportFields" disabled hidden>'+reportFields(t)+field("實際完成時間（臺灣時間）","completedAt",completionValue,"datetime-local")+'<p class="muted">只有確認實際時間時才補填；空白保留原記錄。</p></fieldset></div>':"";
+  const reported=t.status==="completed"?'<div class="section-spacer"><label><input type="checkbox" id="editReportToggle" name="editReport" value="true"> 同時修正施打紀錄</label><p class="muted">原施打者：'+esc(t.operatorName||"未記錄")+'。僅修改基本資料不會改變施打量。</p><fieldset id="editReportFields" disabled hidden>'+reportFields(t,false)+field("施打時間（臺灣時間）","completedAt",completionValue,"datetime-local")+'<p class="muted">只有確認實際時間時才補填；空白保留原記錄。</p></fieldset></div>':"";
   modal("編輯案件",t.taskId,'<form data-form="edit" data-id="'+esc(id)+'"><div class="form-grid">'+field("病人姓名","patientName",t.patientName,"text",true,true)+field("床號","bedNo",t.bedNo,"text",true)+field("病歷號","mrn",t.mrn,"text",true)+'</div>'+assigned+reported+remarkField(t.remark)+'<p class="muted section-spacer">取消紀錄保留；需要再次施打時請重新起單。每次修改均留下紀錄。</p>'+formActions("儲存更新")+'</form>');
 }
 function showRemove(id) {

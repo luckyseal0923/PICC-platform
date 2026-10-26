@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 
 function page(){
- const nodes=new Map();const node=selector=>{if(!nodes.has(selector))nodes.set(selector,{textContent:'',innerHTML:'',hidden:false,dataset:{},addEventListener(){},focus(){this.focused=true;}});return nodes.get(selector);};
+ const nodes=new Map();const node=selector=>{if(!nodes.has(selector))nodes.set(selector,{textContent:'',innerHTML:'',hidden:false,dataset:{},open:false,showModal(){this.open=true;},addEventListener(){},focus(){this.focused=true;}});return nodes.get(selector);};
  const context=vm.createContext({document:{body:{dataset:{}},querySelector:node,addEventListener(){}},location:{pathname:'/picc-create/'},URLSearchParams,Intl,ENTRY_ROUTES:{create:'/picc-create/'},entryPage:()=> 'create',createEntryController:()=>({state:{config:{difficulties:[],sites:[],veins:[],catheters:[]}}})});
  const source=readFileSync(new URL('../client/entry.js',import.meta.url),'utf8').replace(/^import[^\n]*\n/,'').replace(/boot\(\);\s*$/,'');
  vm.runInContext(source,context);return {nodes,node,run:expression=>vm.runInContext(expression,context)};
@@ -23,4 +23,15 @@ test('the self-report form has no return-to-general-create button while the init
  const {node,run}=page();run('renderCreate()');assert.match(node('#entryContent').innerHTML,/自起單・自回報/);
  run('state.selfReport=true;renderCreate()');const html=node('#entryContent').innerHTML;
  assert.match(html,/送出施打回報/);assert.doesNotMatch(html,/改為一般建案|data-action="toggle-self"/);
+});
+
+test('mobile report time defaults to Taipei now, remains editable, and retains a saved draft',()=>{
+ const {node,run}=page();
+ run(`Date=class extends Date{constructor(...args){super(...(args.length?args:['2026-10-25T16:05:00Z']));}};state.selfReport=true;renderCreate()`);
+ assert.match(node('#entryContent').innerHTML,/name="completedAt" type="datetime-local" step="60" required value="2026-10-26T00:05"/);
+ run(`state.draft.completedAt='2026-09-30T23:45';renderCreate()`);
+ assert.match(node('#entryContent').innerHTML,/value="2026-09-30T23:45"/);
+ assert.equal(run(`reportTimeValue('2026-09-30T16:05:00Z')`),'2026-10-01T00:05');
+ run(`openComplete({id:'fake',patientName:'測試D',mrn:'00123456',bedNo:'TEST',taskId:'TEST',claimedId:'test'})`);
+ assert.match(node('#dialogBody').innerHTML,/name="completedAt" type="datetime-local" step="60" required value="2026-10-26T00:05"/);
 });

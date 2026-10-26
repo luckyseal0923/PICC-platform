@@ -11,6 +11,15 @@ function workspace(){
   vm.runInContext(`state.user={id:'shared',role:'admin'};state.status='active';state.tasks=['pending','claimed','completed','cancelled'].map(status=>({id:status,status,patientName:status,bedNo:'TEST',mrn:status,createdAt:new Date().toISOString()}));`,context);
   return expression=>vm.runInContext(expression,context);
 }
+test('desktop reports default to Taipei now and report editing renders only one time field',()=>{
+  const run=workspace();
+  run(`state.config={difficulties:[],sites:[],veins:[],catheters:[]};Date=class extends Date{constructor(...args){super(...(args.length?args:['2026-10-25T16:05:00Z']));}};`);
+  const html=run('reportFields()');
+  assert.match(html,/name="completedAt" type="datetime-local" value="2026-10-26T00:05" required/);
+  assert.equal((html.match(/name="completedAt"/g)||[]).length,1);
+  assert.doesNotMatch(run(`reportFields({completedAt:'2026-09-30T16:05:00Z'},false)`),/name="completedAt"/);
+  assert.equal(run(`reportTimeValue('2026-09-30T16:05:00Z')`),'2026-10-01T00:05');
+});
 test('workbench excludes completed and cancelled cases even if a stale historical filter is selected',()=>{
   const run=workspace();assert.equal(run('visibleTasks().length'),2);
   assert.equal(run("state.status='completed';visibleTasks().length"),0);

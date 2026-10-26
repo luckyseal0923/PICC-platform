@@ -52,12 +52,38 @@ class PiccWorkflows(unittest.TestCase):
         return self.client.post(f"/api/tasks/{task['id']}/claim",
                                 json={"version": task["version"], "operatorId": operator}, headers=self.headers)
 
-    def report(self, task, operator="demo-b"):
+    def report(self, task, operator="demo-b", **extra):
         return self.client.post(f"/api/tasks/{task['id']}/complete",
                                 json={"version": task["version"], "operatorId": operator, "difficulty": "困難",
                                       "insertionSite": "右上臂", "vein": "Basilic", "catheterType": "雙腔PICC",
-                                      "catheterLength": 42.5, "remark": "示範測試"},
+                                      "catheterLength": 42.5, "remark": "示範測試", **extra},
                                 headers=self.headers)
+
+    def test_actual_procedure_time_preserves_taipei_date_and_server_audit_time(self):
+        claimed = self.claim(self.create()).json["task"]
+        response = self.report(claimed, completedAt="2026-09-30T23:45")
+        self.assertEqual(response.status_code, 200, response.json)
+        done = response.json["task"]
+        self.assertEqual(done["completedAt"], "2026-09-30T15:45:00+00:00")
+        self.assertNotEqual(done["completedAt"], done["updatedAt"])
+        stats = self.client.get("/api/stats").json
+        self.assertEqual(next(m["count"] for m in stats["months"] if m["month"] == "2026-09"), 1)
+
+    def test_self_report_can_record_an_earlier_actual_procedure_time(self):
+        task = self.create(selfReport=True, operatorId="demo-a", difficulty="簡單", insertionSite="右上臂",
+                           vein="Basilic", catheterType="單腔PICC", completedAt="2026-10-01T00:05")
+        self.assertEqual(task["completedAt"], "2026-09-30T16:05:00+00:00")
+        self.assertNotEqual(task["createdAt"], task["completedAt"])
+        self.assertEqual(task["claimedAt"], task["createdAt"])
+
+    def test_invalid_actual_procedure_time_does_not_complete_the_case(self):
+        task = self.claim(self.create()).json["task"]
+        response = self.report(task, completedAt="not-a-date")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("施打時間格式", response.json["error"])
+        done = self.report(task).json["task"]
+        self.assertEqual(done["status"], "completed")
+        self.assertTrue(done["completedAt"])
 
     def test_two_active_stages_complete_directly_with_a_valid_lower_limb_report(self):
         task = self.claim(self.create()).json["task"]

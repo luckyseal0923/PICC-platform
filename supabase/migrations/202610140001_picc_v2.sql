@@ -286,14 +286,18 @@ begin
     end if;
     next_status:=case when coalesce((p_payload->>'selfReport')::boolean,false) then 'completed' else 'pending' end;
     if original.id is not null and next_status='completed' then raise exception '重新起單請先建立新開案案件'; end if;
-    if next_status='completed' then report:=picc_v2_private.report(p_payload); end if;
+    if next_status='completed' then
+      report:=picc_v2_private.report(p_payload);
+      completed_time:=coalesce(picc_v2_private.parse_time(p_payload->>'completedAt'),stamp);
+      if not isfinite(completed_time) then raise exception '施打時間格式不正確，請確認後再試'; end if;
+    end if;
     new_id:=gen_random_uuid();
     insert into picc_v2_private.tasks(id,task_id,patient_name,bed_no,mrn,status,created_by,
       operator_id,operator_name,completed_at,difficulty,insertion_site,vein,catheter_type,catheter_length,remark,
       claimed_id,claimed_by,claimed_at,source,reorder_of)
     values(new_id,picc_v2_private.next_case_number(stamp),
       name_value,bed_value,mrn_value,next_status,actor.id,(report->>'operatorId')::uuid,report->>'operatorName',
-      case when report is not null then stamp end,p_payload->>'difficulty',p_payload->>'insertionSite',p_payload->>'vein',
+      case when report is not null then completed_time end,p_payload->>'difficulty',p_payload->>'insertionSite',p_payload->>'vein',
       p_payload->>'catheterType',(report->>'length')::numeric,coalesce(p_payload->>'remark',''),
       (report->>'operatorId')::uuid,report->>'operatorName',case when report is not null then stamp end,
       case when original.id is not null then 'reorder' else 'new' end,original.id)
@@ -364,12 +368,14 @@ begin
   elsif p_action='tasks.complete' then
     if t.status not in ('claimed','awaiting_report') then raise exception '只有等候施打案件可以回報完成'; end if;
     report:=picc_v2_private.report(p_payload);
+    completed_time:=coalesce(picc_v2_private.parse_time(p_payload->>'completedAt'),stamp);
+    if not isfinite(completed_time) then raise exception '施打時間格式不正確，請確認後再試'; end if;
     update picc_v2_private.tasks set status='completed',operator_id=(report->>'operatorId')::uuid,
-      operator_name=report->>'operatorName',completed_at=stamp,difficulty=p_payload->>'difficulty',
+      operator_name=report->>'operatorName',completed_at=completed_time,difficulty=p_payload->>'difficulty',
       insertion_site=p_payload->>'insertionSite',vein=p_payload->>'vein',catheter_type=p_payload->>'catheterType',
       catheter_length=(report->>'length')::numeric,remark=coalesce(p_payload->>'remark',''),updated_at=stamp,version=version+1
       where id=t.id returning * into t;
-    perform picc_v2_private.audit(t.id,'completed',actor,jsonb_build_object('operatorName',t.operator_name));
+    perform picc_v2_private.audit(t.id,'completed',actor,jsonb_build_object('operatorName',t.operator_name,'completedAt',t.completed_at,'reportedAt',stamp));
   elsif p_action='tasks.cancel' then
     if t.status not in ('pending','claimed','awaiting_report') then raise exception '只有進行中的案件可以取消'; end if;
     reason_value:=p_payload->>'reason'; detail_value:=trim(coalesce(p_payload->>'detail',''));

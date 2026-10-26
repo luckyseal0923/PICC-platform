@@ -465,7 +465,13 @@ def create_app(config=None):
                 raise ApiError("管路長度須為正數")
         else:
             length = None
-        return [op["id"], op["name"], now(), data["difficulty"], data["insertionSite"],
+        completed_time = now()
+        if text(data.get("completedAt")):
+            try:
+                completed_time = parse_legacy_date(data["completedAt"])
+            except ApiError:
+                raise ApiError("施打時間格式不正確，請確認後再試")
+        return [op["id"], op["name"], completed_time, data["difficulty"], data["insertionSite"],
                 data["vein"], data["catheterType"], length, text(data.get("remark"))]
 
     def checked_version(data, row):
