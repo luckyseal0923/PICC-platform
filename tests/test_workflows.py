@@ -461,6 +461,54 @@ class PiccWorkflows(unittest.TestCase):
         self.assertEqual(json.loads(requests[0].data)["p_action"], "tasks.get")
         self.assertEqual(requests[1].full_url, "https://api.line.me/v2/bot/message/push")
 
+    def test_completed_and_cancelled_cases_send_plain_text_status_notifications(self):
+        self.app.config.update(
+            LINE_NOTIFICATION_GROUP_ID="Cstatus-group",
+            LINE_MESSAGING_CHANNEL_ACCESS_TOKEN="line-access-token-test",
+        )
+
+        class FakeResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return None
+
+        requests = []
+        class FakeOpener:
+            def open(self, line_request, timeout):
+                requests.append(line_request)
+                return FakeResponse()
+
+        completed_task = self.claim(self.create(patientName="完成測試", mrn="DONE-MRN", bedNo="DONE-BED")).json["task"]
+        completed_task = self.report(completed_task, operator="demo-b").json["task"]
+        cancelled_task = self.claim(self.create(patientName="取消測試", mrn="CANCEL-MRN", bedNo="CANCEL-BED")).json["task"]
+        cancelled = self.client.post(
+            f"/api/tasks/{cancelled_task['id']}/cancel",
+            json={"version": cancelled_task["version"], "reason": "病人因素", "detail": "病人拒絕，已向醫療團隊說明"},
+            headers=self.headers,
+        ).json["task"]
+
+        anonymous = self.app.test_client()
+        with patch("app.urlrequest.build_opener", return_value=FakeOpener()):
+            completed_response = anonymous.post(
+                "/api/line/notify-task-status", json={"taskId": completed_task["id"], "event": "completed"})
+            cancelled_response = anonymous.post(
+                "/api/line/notify-task-status", json={"taskId": cancelled["id"], "event": "cancelled"})
+
+        self.assertTrue(completed_response.json["delivered"])
+        self.assertTrue(cancelled_response.json["delivered"])
+        self.assertEqual(len(requests), 2)
+        completed_message = json.loads(requests[0].data)["messages"][0]
+        cancelled_message = json.loads(requests[1].data)["messages"][0]
+        self.assertEqual(completed_message["type"], "text")
+        self.assertIn("✅ PICC 施打回報完成", completed_message["text"])
+        self.assertIn("施打者：示範施打者乙", completed_message["text"])
+        self.assertIn("DONE-MRN", completed_message["text"])
+        self.assertEqual(cancelled_message["type"], "text")
+        self.assertIn("⚠️ PICC 案件已取消", cancelled_message["text"])
+        self.assertIn("取消原因：病人因素", cancelled_message["text"])
+        self.assertIn("補充說明：病人拒絕，已向醫療團隊說明", cancelled_message["text"])
+        self.assertIn("CANCEL-MRN", cancelled_message["text"])
+
     def test_three_mobile_entries_have_no_patient_data_before_login(self):
         anonymous = self.app.test_client()
         with anonymous.get("/") as landing:

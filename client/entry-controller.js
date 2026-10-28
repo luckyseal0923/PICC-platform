@@ -40,6 +40,12 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
         headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id})});
     }catch(_error){/* A notification outage must never undo or misreport a committed clinical workflow. */}
   }
+  async function notifyStatus(task,event){
+    try{
+      await notificationFetcher("/api/line/notify-task-status",{method:"POST",credentials:"same-origin",keepalive:true,
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id,event})});
+    }catch(_error){/* A notification outage must never undo or misreport a committed clinical workflow. */}
+  }
   return {
     state,
     async boot(){
@@ -82,13 +88,15 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
     },
     async performed(){throw new Error("請直接使用施打回報，已不再設置待回報階段");},
     async complete(task,values){
-      requireReady();return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/complete",{
+      requireReady();const completed=updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/complete",{
         method:"POST",body:{...values,version:task.version}}),"completed",task.id);
+      await notifyStatus(completed,"completed");return completed;
     },
     async cancel(task,reason,detail){
       requireReady();if(!reason||(reason==="其他"&&!detail.trim()))throw new Error("請選擇取消原因；選其他時請補充說明");
-      return updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/cancel",{
+      const cancelled=updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/cancel",{
         method:"POST",body:{version:task.version,reason,detail}}),"cancelled",task.id);
+      await notifyStatus(cancelled,"cancelled");return cancelled;
     }
   };
 }

@@ -277,7 +277,8 @@ def create_app(config=None):
         if shared and not app.config["DEMO_MODE"]:
             raise ApiError("系統尚未完成連線設定，請聯絡管理者或重新整理後再試。", 503)
         public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/line/webhook",
-                  "/api/line/status", "/api/line/notify-task-created", "/api/entry/config", "/api/workspace/config")
+                  "/api/line/status", "/api/line/notify-task-created", "/api/line/notify-task-status",
+                  "/api/entry/config", "/api/workspace/config")
         if request.path.startswith("/api/") and request.path not in public:
             user()
             if request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -517,7 +518,7 @@ def create_app(config=None):
                 replied += 1
         return jsonify(ok=True, accepted=accepted, testReplies=replied)
 
-    def verified_pending_task(task_id):
+    def verified_task(task_id, expected_status):
         local = db().execute("SELECT * FROM tasks WHERE id=? AND deleted_at IS NULL", (task_id,)).fetchone()
         if local:
             task = task_json(local)
@@ -539,40 +540,53 @@ def create_app(config=None):
                     task = json.loads(response.read().decode("utf-8")).get("task")
             except (urlerror.URLError, ValueError, AttributeError):
                 raise ApiError("無法核對新開案件", 503)
-        if not isinstance(task, dict) or task.get("id") != task_id or task.get("status") != "pending":
-            raise ApiError("通知目標不是待預約的新開案件", 409)
+        if not isinstance(task, dict) or task.get("id") != task_id or task.get("status") != expected_status:
+            raise ApiError("案件狀態與通知事件不一致", 409)
         return task
 
-    @app.post("/api/line/notify-task-created")
-    def notify_task_created():
-        data = body()
+    def line_task_id(data):
         task_id = text(data.get("taskId"), 50)
         try:
             if str(uuid.UUID(task_id)) != task_id.lower():
                 raise ValueError()
         except (ValueError, AttributeError):
             raise ApiError("案件識別碼不正確")
-        task = verified_pending_task(task_id)
+        return task_id
+
+    def push_line_event(task, event_type, message):
         target_id, _target_source = configured_line_group()
         if not target_id:
-            return jsonify(ok=True, delivered=False, reason="group_not_enabled")
+            return {"ok": True, "delivered": False, "reason": "group_not_enabled"}
 
-        event_key = "task-created:" + task_id
+        event_key = event_type.replace("_", "-") + ":" + task["id"]
         timestamp = now()
         db().execute(
             "INSERT OR IGNORE INTO line_outbound_events(event_key,event_type,task_id,status,created_at,updated_at) "
-            "VALUES(?,?,?,'queued',?,?)", (event_key, "task_created", task_id, timestamp, timestamp))
-        outbound = db().execute("SELECT status,attempts FROM line_outbound_events WHERE event_key=?", (event_key,)).fetchone()
+            "VALUES(?,?,?,'queued',?,?)", (event_key, event_type, task["id"], timestamp, timestamp))
+        outbound = db().execute(
+            "SELECT status,attempts FROM line_outbound_events WHERE event_key=?", (event_key,)
+        ).fetchone()
         if outbound["status"] == "sent":
-            return jsonify(ok=True, delivered=True, duplicate=True)
+            return {"ok": True, "delivered": True, "duplicate": True}
         if outbound["attempts"] >= 3:
-            return jsonify(ok=True, delivered=False, retryLimitReached=True)
+            return {"ok": True, "delivered": False, "retryLimitReached": True}
 
         claimed = db().execute(
             "UPDATE line_outbound_events SET status='sending',attempts=attempts+1,updated_at=? "
             "WHERE event_key=? AND status IN ('queued','failed') AND attempts<3", (timestamp, event_key)).rowcount
         if claimed != 1:
-            return jsonify(ok=True, delivered=False, inProgress=True)
+            return {"ok": True, "delivered": False, "inProgress": True}
+        delivered = line_api("push", {"to": target_id, "messages": [message]})
+        db().execute("UPDATE line_outbound_events SET status=?,last_error=?,updated_at=? WHERE event_key=?",
+                     ("sent" if delivered else "failed", None if delivered else "LINE API did not confirm delivery",
+                      now(), event_key))
+        return {"ok": True, "delivered": delivered}
+
+    @app.post("/api/line/notify-task-created")
+    def notify_task_created():
+        data = body()
+        task_id = line_task_id(data)
+        task = verified_task(task_id, "pending")
         public_base = text(app.config["PUBLIC_BASE_URL"], 1000).rstrip("/")
         public_origin = urlparse.urlparse(public_base)
         if public_origin.scheme != "https" or not public_origin.hostname or public_origin.username or public_origin.password:
@@ -622,11 +636,32 @@ def create_app(config=None):
                 },
             },
         }
-        delivered = line_api("push", {"to": target_id, "messages": [message]})
-        db().execute("UPDATE line_outbound_events SET status=?,last_error=?,updated_at=? WHERE event_key=?",
-                     ("sent" if delivered else "failed", None if delivered else "LINE API did not confirm delivery",
-                      now(), event_key))
-        return jsonify(ok=True, delivered=delivered)
+        return jsonify(push_line_event(task, "task_created", message))
+
+    @app.post("/api/line/notify-task-status")
+    def notify_task_status():
+        data = body()
+        task_id = line_task_id(data)
+        event = text(data.get("event"), 20)
+        if event not in {"completed", "cancelled"}:
+            raise ApiError("通知事件不正確")
+        task = verified_task(task_id, event)
+        common = (f"姓名：{task.get('patientName', '')}\n"
+                  f"病歷號：{task.get('mrn', '')}\n"
+                  f"床號：{task.get('bedNo', '')}\n"
+                  f"案件編號：{task.get('taskId', '')}\n")
+        if event == "completed":
+            message_text = ("✅ PICC 施打回報完成\n" + common +
+                            f"施打者：{task.get('operatorName') or '未記錄'}\n"
+                            "狀態：已完成施打回報")
+            event_type = "task_completed"
+        else:
+            detail = text(task.get("cancelDetail"), 300)
+            message_text = ("⚠️ PICC 案件已取消\n" + common +
+                            f"取消原因：{task.get('cancelReason') or '未記錄'}" +
+                            (f"\n補充說明：{detail}" if detail else ""))
+            event_type = "task_cancelled"
+        return jsonify(push_line_event(task, event_type, {"type": "text", "text": message_text}))
 
     @app.get("/api/config")
     def config_endpoint():

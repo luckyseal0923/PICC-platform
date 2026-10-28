@@ -61,6 +61,13 @@ async function notifyCreatedTask(task) {
       headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id})});
   } catch(_error) {/* LINE outages must not change the confirmed case result. */}
 }
+async function notifyTaskStatus(task,event) {
+  if(!task?.id)return;
+  try {
+    await fetch("/api/line/notify-task-status",{method:"POST",credentials:"same-origin",keepalive:true,
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id,event})});
+  } catch(_error) {/* LINE outages must not change the confirmed case result. */}
+}
 function userOptions(id) {
   const users=state.users.filter(u=>u.enabled),selected=users.some(u=>u.id===id);
   return (!selected?'<option value="">請選擇施打者</option>':"")+users.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===id?"selected":"")+'>'+esc(u.name)+'</option>').join("");
@@ -429,7 +436,7 @@ document.addEventListener("submit",async e=>{
     else if(type==="member") {values.id=id;values.enabled=values.enabled==="true";await api("/api/users",{method:"POST",body:values});message="已更新團隊成員";}
     else if(type==="import") {const result=await api("/api/import",{method:"POST",body:new FormData(form)});message="新增 "+result.added+" 筆、略過 "+result.skipped+" 筆"+(result.missingCompletionDate?"；"+result.missingCompletionDate+" 筆缺少完成日期":"");}
     else if(type==="announce") {const result=await api("/api/announce",{method:"POST",body:{}});message=result.simulated?"已建立示範通知紀錄，未發送 LINE":"已加入通知佇列，請查看通知紀錄";}
-    else {values.version=state.detail.version;values.editReport=values.editReport==="true";const method=type==="edit"?"PUT":type==="remove"?"DELETE":"POST",suffix=["edit","remove"].includes(type)?"":"/"+type;await api("/api/tasks/"+encodeURIComponent(id)+suffix,{method,body:values});message={claim:"已預約施打",complete:"完成回報已儲存，施打量已更新",cancel:"已取消施打並保留原因",edit:"案件已更新",remove:"案件已移除，操作紀錄已保留"}[type];}
+    else {values.version=state.detail.version;values.editReport=values.editReport==="true";const method=type==="edit"?"PUT":type==="remove"?"DELETE":"POST",suffix=["edit","remove"].includes(type)?"":"/"+type;const result=await api("/api/tasks/"+encodeURIComponent(id)+suffix,{method,body:values});if(type==="complete"||type==="cancel")await notifyTaskStatus(result.task,type==="complete"?"completed":"cancelled");message={claim:"已預約施打",complete:"完成回報已儲存，施打量已更新",cancel:"已取消施打並保留原因",edit:"案件已更新",remove:"案件已移除，操作紀錄已保留"}[type];}
     $("#dialog").close();toast(message);await refresh();
   } catch(error) {toast(error.message,true);}
   finally{submit.disabled=false;submit.textContent=initial;}

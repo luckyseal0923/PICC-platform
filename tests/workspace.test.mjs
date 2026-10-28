@@ -41,6 +41,7 @@ test('desktop creation notifies LINE with only the internal task UUID',()=>{
   assert.match(source,/notifyCreatedTask\(result\.task\)/);
   assert.match(source,/JSON\.stringify\(\{taskId:task\.id\}\)/);
   assert.doesNotMatch(source,/JSON\.stringify\(\{taskId:task\.id,[^}]+(?:patientName|mrn|bedNo)/);
+  assert.match(source,/notifyTaskStatus\(result\.task,type==="complete"\?"completed":"cancelled"\)/);
 });
 test('booked and report-stage cases have one report action and no extra performed action',()=>{
   const run=workspace();

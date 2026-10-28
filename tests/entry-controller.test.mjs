@@ -90,6 +90,23 @@ test("completion keeps the actual performer and original task version",async()=>
   assert.equal(sent.version,3);assert.equal(sent.operatorId,"demo-b");assert.equal(sent.remark,"DEMO");
 });
 
+test("completion and cancellation request their LINE status notifications after confirmation",async()=>{
+  const notices=[];
+  const controlled=createEntryController({adapter:()=>null,fetcher:async path=>{
+      if(path==="/api/entry/config")return response({demo:true,loginRequired:false,user:shared,csrf:"test-csrf"});
+      if(path.endsWith("/complete"))return response({task:{id:"task",status:"completed"}});
+      if(path.endsWith("/cancel"))return response({task:{id:"task",status:"cancelled"}});
+      throw new Error("unexpected path "+path);
+    },notificationFetcher:async(path,options)=>{notices.push({path,body:JSON.parse(options.body)});return response({ok:true,delivered:true});}});
+  await controlled.boot();
+  await controlled.complete({id:"task",version:1},{operatorId:"demo-b"});
+  await controlled.cancel({id:"task",version:2},"病人拒絕","");
+  assert.deepEqual(notices,[
+    {path:"/api/line/notify-task-status",body:{taskId:"task",event:"completed"}},
+    {path:"/api/line/notify-task-status",body:{taskId:"task",event:"cancelled"}},
+  ]);
+});
+
 test("self-report requires a confirmed completed response and preserves retry identity on an ambiguous result",async()=>{
   const payloads=[];let confirmed=false;
   const {client}=scenario((path,options)=>{payloads.push(JSON.parse(options.body));return response({task:{id:"self-report",status:confirmed?"completed":"pending"}});});
