@@ -318,6 +318,49 @@ class PiccWorkflows(unittest.TestCase):
         self.assertEqual(response.json["connectedGroups"], 0)
         self.assertIsNone(response.json["lastOutbound"])
 
+    def test_group_id_can_be_queried_in_group_without_storing_command_text(self):
+        self.app.config.update(
+            LINE_MESSAGING_CHANNEL_SECRET="line-webhook-test-secret",
+            LINE_MESSAGING_CHANNEL_ACCESS_TOKEN="line-access-token-test",
+        )
+        event = {
+            "type": "message", "webhookEventId": "query-group-id", "replyToken": "query-reply",
+            "source": {"type": "group", "groupId": "Cdurable-group", "userId": "Uadmin"},
+            "message": {"id": "query-message", "type": "text", "text": "查詢群組ID"},
+        }
+        raw = json.dumps({"events": [event]}, ensure_ascii=False, separators=(",", ":")).encode()
+
+        class FakeResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return None
+
+        class FakeOpener:
+            def open(self, line_request, timeout):
+                self.request = line_request
+                return FakeResponse()
+
+        opener = FakeOpener()
+        with patch("app.urlrequest.build_opener", return_value=opener):
+            response = self.app.test_client().post(
+                "/api/line/webhook", data=raw, content_type="application/json",
+                headers={"X-Line-Signature": self.line_signature(raw)},
+            )
+        self.assertEqual(response.status_code, 200, response.json)
+        sent = json.loads(opener.request.data)
+        self.assertIn("Cdurable-group", sent["messages"][0]["text"])
+
+    def test_environment_group_id_survives_without_local_recipient_state(self):
+        self.app.config.update(
+            LINE_NOTIFICATION_GROUP_ID="Cenvironment-group",
+            LINE_MESSAGING_CHANNEL_SECRET="line-webhook-test-secret",
+            LINE_MESSAGING_CHANNEL_ACCESS_TOKEN="line-access-token-test",
+        )
+        response = self.app.test_client().get("/api/line/status")
+        self.assertTrue(response.json["enabled"])
+        self.assertEqual(response.json["targetSource"], "environment")
+        self.assertNotIn("Cenvironment-group", json.dumps(response.json))
+
     def test_new_pending_case_push_has_required_identifiers_and_is_deduplicated(self):
         self.app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"] = "line-access-token-test"
         task = self.create(patientName="DEMO 不可出現", mrn="SECRET-MRN", bedNo="SECRET-BED")

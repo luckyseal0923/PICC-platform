@@ -71,6 +71,7 @@ def create_app(config=None):
         LINE_CHANNEL_ID=os.environ.get("LINE_LOGIN_CHANNEL_ID", ""),
         LINE_MESSAGING_CHANNEL_SECRET=os.environ.get("LINE_MESSAGING_CHANNEL_SECRET", ""),
         LINE_MESSAGING_CHANNEL_ACCESS_TOKEN=os.environ.get("LINE_MESSAGING_CHANNEL_ACCESS_TOKEN", ""),
+        LINE_NOTIFICATION_GROUP_ID=os.environ.get("LINE_NOTIFICATION_GROUP_ID", ""),
         PUBLIC_BASE_URL=os.environ.get("PICC_PUBLIC_BASE_URL", "https://picc-platform.wfhai.org"),
         BOOTSTRAP_ADMIN=os.environ.get("PICC_BOOTSTRAP_ADMIN_LINE_ID", ""),
         NOTIFICATION_WEBHOOK=os.environ.get("PICC_NOTIFICATION_WEBHOOK", ""),
@@ -383,13 +384,23 @@ def create_app(config=None):
         except (urlerror.URLError, ValueError):
             return False
 
+    def configured_line_group():
+        configured = text(app.config.get("LINE_NOTIFICATION_GROUP_ID"), 100)
+        if configured:
+            return configured, "environment"
+        selected = db().execute(
+            "SELECT source_id FROM line_recipients WHERE source_type='group' AND active=1 "
+            "AND notification_enabled=1 ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        return (selected["source_id"], "webhook") if selected else (None, None)
+
     @app.get("/api/line/status")
     def line_status():
         """Expose operational state without returning LINE IDs or patient data."""
+        target_id, target_source = configured_line_group()
         selected = db().execute(
-            "SELECT last_event_at FROM line_recipients WHERE source_type='group' AND active=1 "
-            "AND notification_enabled=1 ORDER BY updated_at DESC LIMIT 1"
-        ).fetchone()
+            "SELECT last_event_at FROM line_recipients WHERE source_id=?", (target_id,)
+        ).fetchone() if target_id else None
         connected_groups = db().execute(
             "SELECT COUNT(*) AS count FROM line_recipients WHERE source_type='group' AND active=1"
         ).fetchone()["count"]
@@ -402,7 +413,8 @@ def create_app(config=None):
             configurationReady=bool(app.config["LINE_MESSAGING_CHANNEL_SECRET"] and
                                     app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"]),
             connectedGroups=connected_groups,
-            enabled=bool(selected),
+            enabled=bool(target_id),
+            targetSource=target_source,
             selectedLastEventAt=selected["last_event_at"] if selected else None,
             lastOutbound=dict(outbound) if outbound else None,
         )
@@ -481,15 +493,17 @@ def create_app(config=None):
                      received_at, received_at, received_at),
                 )
                 if source_type == "group" and event_type == "message" and message_text in {
-                        "啟用起單通知", "停止起單通知"}:
+                        "啟用起單通知", "停止起單通知", "查詢群組ID"}:
                     reply_token = text(event.get("replyToken"), 200)
                     if message_text == "啟用起單通知":
                         connection.execute("UPDATE line_recipients SET notification_enabled=0 WHERE source_type='group'")
                         connection.execute("UPDATE line_recipients SET notification_enabled=1 WHERE source_id=?", (source_id,))
                         reply_text = "已將本群組設為 PICC 新開案通知群組"
-                    else:
+                    elif message_text == "停止起單通知":
                         connection.execute("UPDATE line_recipients SET notification_enabled=0 WHERE source_id=?", (source_id,))
                         reply_text = "已停止將 PICC 新開案通知送到本群組"
+                    else:
+                        reply_text = "本群組的 LINE Group ID：\n" + source_id
                     if reply_token:
                         reply_messages.append((reply_token, reply_text))
             connection.execute("COMMIT")
@@ -539,11 +553,8 @@ def create_app(config=None):
         except (ValueError, AttributeError):
             raise ApiError("案件識別碼不正確")
         task = verified_pending_task(task_id)
-        target = db().execute(
-            "SELECT source_id FROM line_recipients WHERE source_type='group' AND active=1 "
-            "AND notification_enabled=1 ORDER BY updated_at DESC LIMIT 1"
-        ).fetchone()
-        if not target:
+        target_id, _target_source = configured_line_group()
+        if not target_id:
             return jsonify(ok=True, delivered=False, reason="group_not_enabled")
 
         event_key = "task-created:" + task_id
@@ -574,7 +585,7 @@ def create_app(config=None):
                    f"案件編號：{task.get('taskId', '')}\n"
                    "狀態：待預約施打\n"
                    "請至 PICC 平台查看並預約施打：\n" + booking_url)
-        delivered = line_api("push", {"to": target["source_id"], "messages": [{"type": "text", "text": message}]})
+        delivered = line_api("push", {"to": target_id, "messages": [{"type": "text", "text": message}]})
         db().execute("UPDATE line_outbound_events SET status=?,last_error=?,updated_at=? WHERE event_key=?",
                      ("sent" if delivered else "failed", None if delivered else "LINE API did not confirm delivery",
                       now(), event_key))

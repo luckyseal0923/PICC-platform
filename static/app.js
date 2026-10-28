@@ -271,7 +271,7 @@ async function renderNotifications() {
   if(!line.configurationReady){headline="LINE 伺服器設定未完成";detail="請確認 Channel secret 與 Channel access token 已加入正式環境。";alertClass="error";}
   else if(!line.connectedGroups){headline="尚未收到 LINE 群組事件";detail="請確認機器人已加入群組，並在群組中輸入「啟用起單通知」。";}
   else if(!line.enabled){headline="LINE 群組尚未啟用新案通知";detail="請在要接收通知的群組中輸入「啟用起單通知」，並確認機器人回覆啟用成功。";}
-  else {headline="LINE 新案通知已啟用";detail="之後建立的一般新案件會自動通知指定群組；自起單・自回報不發送。";alertClass="success";}
+  else {headline="LINE 新案通知已啟用";detail="之後建立的一般新案件會自動通知指定群組；自起單・自回報不發送。"+(line.targetSource==="environment"?" 通知群組已由正式環境固定設定，不會因重新部署遺失。":" 建議將 Group ID 加入正式環境，避免重新部署後遺失。");alertClass="success";}
   const last=line.lastOutbound;
   const lastResult=last?'<dl class="summary-list"><div><dt>最近一次推送</dt><dd>'+esc(status[last.status]||last.status)+'</dd></div><div><dt>更新時間</dt><dd>'+fmt(last.updated_at)+'</dd></div><div><dt>嘗試次數</dt><dd>'+esc(last.attempts)+'</dd></div>'+(last.last_error?'<div><dt>失敗原因</dt><dd>'+esc(last.last_error)+'</dd></div>':"")+'</dl>':empty("尚無推送紀錄","未啟用群組時建立的案件不會建立推送紀錄，也不會事後自動補送。");
   return '<div class="alert '+alertClass+'"><strong>'+esc(headline)+'</strong><br>'+esc(detail)+'</div><section class="panel"><div class="panel-head"><h2>LINE 通知狀態</h2><small>已辨識 '+esc(line.connectedGroups)+' 個有效群組</small></div><div class="panel-body">'+lastResult+'</div></section>';
