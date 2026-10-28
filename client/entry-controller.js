@@ -5,7 +5,7 @@ export function entryPage(path){
   return Object.keys(ENTRY_ROUTES).find(key=>ENTRY_ROUTES[key].replace(/\/+$/,"")===normalized)||"create";
 }
 export function createEntryController({fetcher=globalThis.fetch,adapter=()=>globalThis.PiccSupabase,
-  uuid=()=>globalThis.crypto.randomUUID(),onUnavailable=()=>{}}={}){
+  notificationFetcher=globalThis.fetch,uuid=()=>globalThis.crypto.randomUUID(),onUnavailable=()=>{}}={}){
   const state={config:{},actor:null,csrf:""};
   let draft=null;
   const connected=()=>adapter()?.enabled();
@@ -34,6 +34,12 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
   }
   function requireReady(){if(!state.actor)throw new Error("入口尚未就緒，請重新整理");}
   function updated(data,status=null,id=null){if(!data?.task?.id||(status&&data.task.status!==status)||(id&&data.task.id!==id))throw new Error("伺服器未確認案件結果，請重新整理確認後再試");return data.task;}
+  async function notifyCreated(task){
+    try{
+      await notificationFetcher("/api/line/notify-task-created",{method:"POST",credentials:"same-origin",keepalive:true,
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id})});
+    }catch(_error){/* A notification outage must never undo or misreport a committed clinical workflow. */}
+  }
   return {
     state,
     async boot(){
@@ -65,7 +71,9 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
         error.duplicateWarning=true;error.duplicateCount=result.duplicateCount;throw error;
       }
       const task=updated(result,values.selfReport?"completed":null);
-      draft=null;return task;
+      draft=null;
+      if(!values.selfReport)await notifyCreated(task);
+      return task;
     },
     async claim(task,operatorId){
       requireReady();if(!operatorId)throw new Error("請先選擇施打人");

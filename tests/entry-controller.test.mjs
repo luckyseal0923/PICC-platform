@@ -53,6 +53,21 @@ test("changed form data gets a fresh request ID after a failed submission",async
   assert.notEqual(payloads[0].requestId,payloads[1].requestId);
 });
 
+test("a confirmed new case requests LINE notification without exposing clinical fields",async()=>{
+  const notices=[];
+  const task={id:"9e96fd68-4f7f-4ac2-a6f8-a4c416004490",taskId:"PICC-2610-001",status:"pending"};
+  const controlled=createEntryController({adapter:()=>null,uuid:()=>"request-1",fetcher:async path=>{
+      if(path==="/api/entry/config")return response({demo:true,loginRequired:false,user:shared,csrf:"test-csrf"});
+      if(path==="/api/entry/tasks")return response({task});
+      throw new Error("unexpected path "+path);
+    },
+    notificationFetcher:async(path,options)=>{notices.push({path,options});return response({ok:true,delivered:true});}});
+  await controlled.boot();
+  await controlled.create({bedNo:"SECRET-BED",mrn:"SECRET-MRN",patientName:"SECRET-NAME",selfReport:false});
+  assert.equal(notices.length,1);assert.equal(notices[0].path,"/api/line/notify-task-created");
+  assert.deepEqual(JSON.parse(notices[0].options.body),{taskId:task.id});
+});
+
 test("claim requires an explicit performer, carries CSRF/version and does not retry a conflict",async()=>{
   const {client,calls}=scenario(()=>response({error:"案件已被其他人更新"},409));
   await client.boot();const count=calls.length;

@@ -71,6 +71,7 @@ def create_app(config=None):
         LINE_CHANNEL_ID=os.environ.get("LINE_LOGIN_CHANNEL_ID", ""),
         LINE_MESSAGING_CHANNEL_SECRET=os.environ.get("LINE_MESSAGING_CHANNEL_SECRET", ""),
         LINE_MESSAGING_CHANNEL_ACCESS_TOKEN=os.environ.get("LINE_MESSAGING_CHANNEL_ACCESS_TOKEN", ""),
+        PUBLIC_BASE_URL=os.environ.get("PICC_PUBLIC_BASE_URL", "https://picc-platform.wfhai.org"),
         BOOTSTRAP_ADMIN=os.environ.get("PICC_BOOTSTRAP_ADMIN_LINE_ID", ""),
         NOTIFICATION_WEBHOOK=os.environ.get("PICC_NOTIFICATION_WEBHOOK", ""),
         NOTIFICATION_SECRET=os.environ.get("PICC_NOTIFICATION_SECRET", ""),
@@ -151,6 +152,7 @@ def create_app(config=None):
           source_type TEXT NOT NULL CHECK(source_type IN ('user','group','room')),
           actor_user_id TEXT,
           active INTEGER NOT NULL DEFAULT 1,
+          notification_enabled INTEGER NOT NULL DEFAULT 0,
           last_event_type TEXT NOT NULL,
           last_event_at TEXT NOT NULL,
           created_at TEXT NOT NULL,
@@ -164,8 +166,21 @@ def create_app(config=None):
           is_redelivery INTEGER NOT NULL DEFAULT 0,
           received_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS line_outbound_events(
+          event_key TEXT PRIMARY KEY,
+          event_type TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS line_recipient_active ON line_recipients(active,source_type);
         """)
+        recipient_columns = {r["name"] for r in db().execute("PRAGMA table_info(line_recipients)")}
+        if "notification_enabled" not in recipient_columns:
+            db().execute("ALTER TABLE line_recipients ADD COLUMN notification_enabled INTEGER NOT NULL DEFAULT 0")
         if "reorder_of" not in {r["name"] for r in db().execute("PRAGMA table_info(tasks)") }:
             db().execute("ALTER TABLE tasks ADD COLUMN reorder_of TEXT")
         task_schema = db().execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()[0]
@@ -260,7 +275,8 @@ def create_app(config=None):
         shared = request.path.startswith(("/api/entry/", "/api/workspace/"))
         if shared and not app.config["DEMO_MODE"]:
             raise ApiError("系統尚未完成連線設定，請聯絡管理者或重新整理後再試。", 503)
-        public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/line/webhook", "/api/entry/config", "/api/workspace/config")
+        public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/line/webhook",
+                  "/api/line/notify-task-created", "/api/entry/config", "/api/workspace/config")
         if request.path.startswith("/api/") and request.path not in public:
             user()
             if request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -347,6 +363,26 @@ def create_app(config=None):
     def health():
         return jsonify(ok=True)
 
+    class NoRedirect(urlrequest.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    def line_api(path, payload):
+        access_token = app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"]
+        if not access_token:
+            return False
+        line_request = urlrequest.Request(
+            "https://api.line.me/v2/bot/message/" + path,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + access_token},
+            method="POST",
+        )
+        try:
+            with urlrequest.build_opener(NoRedirect).open(line_request, timeout=8) as response:
+                return 200 <= response.status < 300
+        except (urlerror.URLError, ValueError):
+            return False
+
     @app.post("/api/line/webhook")
     def line_webhook():
         """Receive LINE events without retaining chat text or clinical content."""
@@ -374,7 +410,7 @@ def create_app(config=None):
         connection = db()
         connection.execute("BEGIN IMMEDIATE")
         accepted = 0
-        test_reply_tokens = []
+        reply_messages = []
         try:
             for event in events:
                 if not isinstance(event, dict):
@@ -399,11 +435,11 @@ def create_app(config=None):
                     continue
                 accepted += 1
                 message = event.get("message") if isinstance(event.get("message"), dict) else {}
-                if (event_type == "message" and message.get("type") == "text"
-                        and text(message.get("text"), 50) == "Webhook 測試"):
+                message_text = text(message.get("text"), 50) if message.get("type") == "text" else ""
+                if event_type == "message" and message_text == "Webhook 測試":
                     reply_token = text(event.get("replyToken"), 200)
                     if reply_token:
-                        test_reply_tokens.append(reply_token)
+                        reply_messages.append((reply_token, "PICC 網站 Webhook 已成功連線"))
                 if source_type not in {"user", "group", "room"} or not source_id:
                     continue
                 active = 0 if event_type in {"unfollow", "leave"} else 1
@@ -420,36 +456,102 @@ def create_app(config=None):
                     (source_id, source_type, actor_user_id or None, active, event_type,
                      received_at, received_at, received_at),
                 )
+                if source_type == "group" and event_type == "message" and message_text in {
+                        "啟用起單通知", "停止起單通知"}:
+                    reply_token = text(event.get("replyToken"), 200)
+                    if message_text == "啟用起單通知":
+                        connection.execute("UPDATE line_recipients SET notification_enabled=0 WHERE source_type='group'")
+                        connection.execute("UPDATE line_recipients SET notification_enabled=1 WHERE source_id=?", (source_id,))
+                        reply_text = "已將本群組設為 PICC 新開案通知群組"
+                    else:
+                        connection.execute("UPDATE line_recipients SET notification_enabled=0 WHERE source_id=?", (source_id,))
+                        reply_text = "已停止將 PICC 新開案通知送到本群組"
+                    if reply_token:
+                        reply_messages.append((reply_token, reply_text))
             connection.execute("COMMIT")
         except Exception:
             connection.execute("ROLLBACK")
             raise
 
         replied = 0
-        access_token = app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"]
-        if access_token:
-            class NoRedirect(urlrequest.HTTPRedirectHandler):
-                def redirect_request(self, req, fp, code, msg, headers, newurl):
-                    return None
-            for reply_token in test_reply_tokens:
-                reply_payload = {
-                    "replyToken": reply_token,
-                    "messages": [{"type": "text", "text": "PICC 網站 Webhook 已成功連線"}],
-                }
-                reply_request = urlrequest.Request(
-                    "https://api.line.me/v2/bot/message/reply",
-                    data=json.dumps(reply_payload, ensure_ascii=False).encode("utf-8"),
-                    headers={"Content-Type": "application/json",
-                             "Authorization": "Bearer " + access_token},
-                    method="POST",
-                )
-                try:
-                    with urlrequest.build_opener(NoRedirect).open(reply_request, timeout=8) as response:
-                        if 200 <= response.status < 300:
-                            replied += 1
-                except (urlerror.URLError, ValueError):
-                    pass
+        for reply_token, reply_text in reply_messages:
+            if line_api("reply", {"replyToken": reply_token, "messages": [{"type": "text", "text": reply_text}]}):
+                replied += 1
         return jsonify(ok=True, accepted=accepted, testReplies=replied)
+
+    def verified_pending_task(task_id):
+        local = db().execute("SELECT * FROM tasks WHERE id=? AND deleted_at IS NULL", (task_id,)).fetchone()
+        if local:
+            task = task_json(local)
+        else:
+            supabase_url = text(app.config["SUPABASE_PUBLIC_URL"], 1000).rstrip("/")
+            supabase_key = text(app.config["SUPABASE_PUBLIC_KEY"], 4000)
+            parsed = urlparse.urlparse(supabase_url)
+            if parsed.scheme != "https" or not parsed.hostname or not supabase_key:
+                raise ApiError("無法核對新開案件", 503)
+            verify_request = urlrequest.Request(
+                supabase_url + "/rest/v1/rpc/picc_v2_entry_api",
+                data=json.dumps({"p_action": "tasks.get", "p_payload": {"id": task_id}}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "apikey": supabase_key,
+                         "Authorization": "Bearer " + supabase_key},
+                method="POST",
+            )
+            try:
+                with urlrequest.build_opener(NoRedirect).open(verify_request, timeout=8) as response:
+                    task = json.loads(response.read().decode("utf-8")).get("task")
+            except (urlerror.URLError, ValueError, AttributeError):
+                raise ApiError("無法核對新開案件", 503)
+        if not isinstance(task, dict) or task.get("id") != task_id or task.get("status") != "pending":
+            raise ApiError("通知目標不是待預約的新開案件", 409)
+        return task
+
+    @app.post("/api/line/notify-task-created")
+    def notify_task_created():
+        data = body()
+        task_id = text(data.get("taskId"), 50)
+        try:
+            if str(uuid.UUID(task_id)) != task_id.lower():
+                raise ValueError()
+        except (ValueError, AttributeError):
+            raise ApiError("案件識別碼不正確")
+        task = verified_pending_task(task_id)
+        target = db().execute(
+            "SELECT source_id FROM line_recipients WHERE source_type='group' AND active=1 "
+            "AND notification_enabled=1 ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        if not target:
+            return jsonify(ok=True, delivered=False, reason="group_not_enabled")
+
+        event_key = "task-created:" + task_id
+        timestamp = now()
+        db().execute(
+            "INSERT OR IGNORE INTO line_outbound_events(event_key,event_type,task_id,status,created_at,updated_at) "
+            "VALUES(?,?,?,'queued',?,?)", (event_key, "task_created", task_id, timestamp, timestamp))
+        outbound = db().execute("SELECT status,attempts FROM line_outbound_events WHERE event_key=?", (event_key,)).fetchone()
+        if outbound["status"] == "sent":
+            return jsonify(ok=True, delivered=True, duplicate=True)
+        if outbound["attempts"] >= 3:
+            return jsonify(ok=True, delivered=False, retryLimitReached=True)
+
+        claimed = db().execute(
+            "UPDATE line_outbound_events SET status='sending',attempts=attempts+1,updated_at=? "
+            "WHERE event_key=? AND status IN ('queued','failed') AND attempts<3", (timestamp, event_key)).rowcount
+        if claimed != 1:
+            return jsonify(ok=True, delivered=False, inProgress=True)
+        public_base = text(app.config["PUBLIC_BASE_URL"], 1000).rstrip("/")
+        public_origin = urlparse.urlparse(public_base)
+        if public_origin.scheme != "https" or not public_origin.hostname or public_origin.username or public_origin.password:
+            raise ApiError("公開平台網址設定不正確", 503)
+        booking_url = public_base + "/picc-booking/"
+        message = ("📌 PICC 新案件已建立\n"
+                   f"案件編號：{task.get('taskId', '')}\n"
+                   "狀態：待預約施打\n"
+                   "請至 PICC 平台查看並預約施打：\n" + booking_url)
+        delivered = line_api("push", {"to": target["source_id"], "messages": [{"type": "text", "text": message}]})
+        db().execute("UPDATE line_outbound_events SET status=?,last_error=?,updated_at=? WHERE event_key=?",
+                     ("sent" if delivered else "failed", None if delivered else "LINE API did not confirm delivery",
+                      now(), event_key))
+        return jsonify(ok=True, delivered=delivered)
 
     @app.get("/api/config")
     def config_endpoint():

@@ -264,6 +264,135 @@ class PiccWorkflows(unittest.TestCase):
             )
         self.assertNotIn("Webhook 測試", database_text)
 
+    def test_line_group_can_be_selected_for_new_case_notifications(self):
+        self.app.config.update(
+            LINE_MESSAGING_CHANNEL_SECRET="line-webhook-test-secret",
+            LINE_MESSAGING_CHANNEL_ACCESS_TOKEN="line-access-token-test",
+        )
+        event = {
+            "type": "message", "webhookEventId": "enable-notifications", "replyToken": "enable-reply",
+            "source": {"type": "group", "groupId": "Cnotification-group", "userId": "Uadmin"},
+            "message": {"id": "enable-message", "type": "text", "text": "啟用起單通知"},
+        }
+        raw = json.dumps({"events": [event]}, ensure_ascii=False, separators=(",", ":")).encode()
+
+        class FakeResponse:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+
+        class FakeOpener:
+            def open(self, line_request, timeout):
+                self.request = line_request
+                return FakeResponse()
+
+        opener = FakeOpener()
+        with patch("app.urlrequest.build_opener", return_value=opener):
+            response = self.app.test_client().post(
+                "/api/line/webhook", data=raw, content_type="application/json",
+                headers={"X-Line-Signature": self.line_signature(raw)},
+            )
+        self.assertEqual(response.status_code, 200, response.json)
+        sent = json.loads(opener.request.data)
+        self.assertEqual(sent["messages"][0]["text"], "已將本群組設為 PICC 新開案通知群組")
+        with closing(sqlite3.connect(self.path)) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT notification_enabled FROM line_recipients WHERE source_id='Cnotification-group'"
+            ).fetchone()[0], 1)
+
+    def test_new_pending_case_push_is_minimal_and_deduplicated(self):
+        self.app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"] = "line-access-token-test"
+        task = self.create(patientName="DEMO 不可出現", mrn="SECRET-MRN", bedNo="SECRET-BED")
+        with closing(sqlite3.connect(self.path)) as connection:
+            connection.execute(
+                "INSERT INTO line_recipients(source_id,source_type,active,notification_enabled,last_event_type,"
+                "last_event_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                ("Cnotification-group", "group", 1, 1, "message", "2026-10-29T00:00:00+00:00",
+                 "2026-10-29T00:00:00+00:00", "2026-10-29T00:00:00+00:00"),
+            )
+            connection.commit()
+
+        class FakeResponse:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+
+        requests = []
+        class FakeOpener:
+            def open(self, line_request, timeout):
+                requests.append(line_request)
+                return FakeResponse()
+
+        anonymous = self.app.test_client()
+        with patch("app.urlrequest.build_opener", return_value=FakeOpener()):
+            first = anonymous.post("/api/line/notify-task-created", json={"taskId": task["id"]})
+            second = anonymous.post("/api/line/notify-task-created", json={"taskId": task["id"]})
+        self.assertEqual(first.status_code, 200, first.json)
+        self.assertTrue(first.json["delivered"])
+        self.assertTrue(second.json["duplicate"])
+        self.assertEqual(len(requests), 1)
+        payload = json.loads(requests[0].data)
+        self.assertEqual(payload["to"], "Cnotification-group")
+        message = payload["messages"][0]["text"]
+        self.assertIn(task["taskId"], message)
+        self.assertIn("https://picc-platform.wfhai.org/picc-booking/", message)
+        self.assertNotIn("DEMO 不可出現", message)
+        self.assertNotIn("SECRET-MRN", message)
+        self.assertNotIn("SECRET-BED", message)
+
+    def test_production_notification_verifies_supabase_before_line_push(self):
+        task_id = "f21ab2ca-2cb4-4ed8-bd7c-ecb761cd9e12"
+        self.app.config.update(
+            DEMO_MODE=False,
+            SUPABASE_PUBLIC_URL="https://supabase.example.test",
+            SUPABASE_PUBLIC_KEY="public-anon-key",
+            LINE_MESSAGING_CHANNEL_ACCESS_TOKEN="line-access-token-test",
+        )
+        with closing(sqlite3.connect(self.path)) as connection:
+            connection.execute(
+                "INSERT INTO line_recipients(source_id,source_type,active,notification_enabled,last_event_type,"
+                "last_event_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                ("Cproduction-group", "group", 1, 1, "message", "2026-10-29T00:00:00+00:00",
+                 "2026-10-29T00:00:00+00:00", "2026-10-29T00:00:00+00:00"),
+            )
+            connection.commit()
+
+        requests = []
+        class FakeResponse:
+            status = 200
+            def __init__(self, body=b""):
+                self.body = body
+            def read(self):
+                return self.body
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+
+        class FakeOpener:
+            def open(self, outbound, timeout):
+                requests.append(outbound)
+                if outbound.full_url.endswith("/rest/v1/rpc/picc_v2_entry_api"):
+                    verified = {"task": {"id": task_id, "taskId": "PICC-2610-999", "status": "pending"}}
+                    return FakeResponse(json.dumps(verified).encode())
+                return FakeResponse()
+
+        with patch("app.urlrequest.build_opener", return_value=FakeOpener()):
+            response = self.app.test_client().post(
+                "/api/line/notify-task-created", json={"taskId": task_id},
+                headers={"Origin": "http://localhost"}, base_url="http://localhost",
+            )
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertTrue(response.json["delivered"])
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0].headers["Apikey"], "public-anon-key")
+        self.assertEqual(json.loads(requests[0].data)["p_action"], "tasks.get")
+        self.assertEqual(requests[1].full_url, "https://api.line.me/v2/bot/message/push")
+
     def test_three_mobile_entries_have_no_patient_data_before_login(self):
         anonymous = self.app.test_client()
         with anonymous.get("/") as landing:
