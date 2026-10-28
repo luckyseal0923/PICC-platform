@@ -302,6 +302,22 @@ class PiccWorkflows(unittest.TestCase):
                 "SELECT notification_enabled FROM line_recipients WHERE source_id='Cnotification-group'"
             ).fetchone()[0], 1)
 
+        status = self.app.test_client().get("/api/line/status")
+        self.assertEqual(status.status_code, 200, status.json)
+        self.assertTrue(status.json["configurationReady"])
+        self.assertTrue(status.json["enabled"])
+        self.assertEqual(status.json["connectedGroups"], 1)
+        self.assertNotIn("sourceId", status.json)
+        self.assertNotIn("Cnotification-group", json.dumps(status.json))
+
+    def test_line_status_explains_unconfigured_state_without_exposing_identifiers(self):
+        response = self.app.test_client().get("/api/line/status")
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertFalse(response.json["configurationReady"])
+        self.assertFalse(response.json["enabled"])
+        self.assertEqual(response.json["connectedGroups"], 0)
+        self.assertIsNone(response.json["lastOutbound"])
+
     def test_new_pending_case_push_has_required_identifiers_and_is_deduplicated(self):
         self.app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"] = "line-access-token-test"
         task = self.create(patientName="DEMO 不可出現", mrn="SECRET-MRN", bedNo="SECRET-BED")

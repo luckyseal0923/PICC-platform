@@ -276,7 +276,7 @@ def create_app(config=None):
         if shared and not app.config["DEMO_MODE"]:
             raise ApiError("系統尚未完成連線設定，請聯絡管理者或重新整理後再試。", 503)
         public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/line/webhook",
-                  "/api/line/notify-task-created", "/api/entry/config", "/api/workspace/config")
+                  "/api/line/status", "/api/line/notify-task-created", "/api/entry/config", "/api/workspace/config")
         if request.path.startswith("/api/") and request.path not in public:
             user()
             if request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -382,6 +382,30 @@ def create_app(config=None):
                 return 200 <= response.status < 300
         except (urlerror.URLError, ValueError):
             return False
+
+    @app.get("/api/line/status")
+    def line_status():
+        """Expose operational state without returning LINE IDs or patient data."""
+        selected = db().execute(
+            "SELECT last_event_at FROM line_recipients WHERE source_type='group' AND active=1 "
+            "AND notification_enabled=1 ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        connected_groups = db().execute(
+            "SELECT COUNT(*) AS count FROM line_recipients WHERE source_type='group' AND active=1"
+        ).fetchone()["count"]
+        outbound = db().execute(
+            "SELECT status,attempts,last_error,updated_at FROM line_outbound_events "
+            "ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        return jsonify(
+            ok=True,
+            configurationReady=bool(app.config["LINE_MESSAGING_CHANNEL_SECRET"] and
+                                    app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"]),
+            connectedGroups=connected_groups,
+            enabled=bool(selected),
+            selectedLastEventAt=selected["last_event_at"] if selected else None,
+            lastOutbound=dict(outbound) if outbound else None,
+        )
 
     @app.post("/api/line/webhook")
     def line_webhook():

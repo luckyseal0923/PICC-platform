@@ -263,10 +263,18 @@ function renderMembers() {
   return '<div class="filters"><button class="button primary" data-action="member">'+icon("plus")+'新增施打者</button></div><div class="member-grid">'+state.users.map(u=>'<article class="member-card"><span class="avatar">'+esc(u.name.slice(0,1))+'</span><h3>'+esc(u.name)+'</h3><small>'+(u.enabled?"啟用":"停用")+'</small><button class="button secondary" data-action="member" data-id="'+esc(u.id)+'">編輯施打者</button></article>').join("")+'</div>';
 }
 async function renderNotifications() {
-  const data=await api("/api/notifications");
-  if(data.deferred||state.config.notificationsEnabled===false)return '<div class="alert info-alert">LINE 群組通知會在下一階段啟用，目前先完成案件與統計功能。</div><section class="panel"><div class="panel-head"><h2>LINE 通知（待串接）</h2><button class="button secondary small-button" data-action="announce">預覽等候施打清單</button></div>'+empty("LINE 通知尚未啟用","可先預覽等候施打清單，案件操作不會發送訊息。")+'</section>';
-  const status={simulated:"示範紀錄（未發送）",queued:"待發送",sent:"服務確認送出",failed:"發送未完成",sending:"發送中"};
-  return '<div class="alert info-alert">案件寫入與通知結果分開記錄。通知未完成時可重試，無需重複建立或回報案件。</div><section class="panel"><div class="panel-head"><h2>LINE 通知紀錄</h2><button class="button secondary small-button" data-action="announce">預覽等候施打公告</button></div><div class="table-scroll"><table><thead><tr><th>時間</th><th>通知事件</th><th>操作人</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+data.notifications.map(n=>'<tr><td>'+fmt(n.created_at)+'</td><td>'+esc(eventLabels[n.event]||n.event)+'</td><td>'+esc(n.actor_name)+'</td><td>'+esc(status[n.status]||n.status)+(n.last_error?'<small>'+esc(n.last_error)+'</small>':"")+'</td><td>'+((n.status==="queued"||n.status==="failed")?'<button class="button secondary small-button" data-action="retry" data-id="'+n.id+'">重試通知</button>':"—")+'</td></tr>').join("")+'</tbody></table>'+(data.notifications.length?"":empty("還沒有通知紀錄","新增或更新案件後會顯示於此。"))+'</div></section>';
+  let line;
+  try {const response=await fetch("/api/line/status",{credentials:"same-origin",cache:"no-store"});line=await response.json();if(!response.ok)throw new Error(line.error||"無法讀取 LINE 狀態");}
+  catch(error){return '<div class="alert error">無法讀取 LINE 通知狀態：'+esc(error.message)+'</div>';}
+  const status={queued:"待發送",sent:"LINE API 已確認送出",failed:"發送失敗",sending:"發送中"};
+  let headline,detail,alertClass="info-alert";
+  if(!line.configurationReady){headline="LINE 伺服器設定未完成";detail="請確認 Channel secret 與 Channel access token 已加入正式環境。";alertClass="error";}
+  else if(!line.connectedGroups){headline="尚未收到 LINE 群組事件";detail="請確認機器人已加入群組，並在群組中輸入「啟用起單通知」。";}
+  else if(!line.enabled){headline="LINE 群組尚未啟用新案通知";detail="請在要接收通知的群組中輸入「啟用起單通知」，並確認機器人回覆啟用成功。";}
+  else {headline="LINE 新案通知已啟用";detail="之後建立的一般新案件會自動通知指定群組；自起單・自回報不發送。";alertClass="success";}
+  const last=line.lastOutbound;
+  const lastResult=last?'<dl class="summary-list"><div><dt>最近一次推送</dt><dd>'+esc(status[last.status]||last.status)+'</dd></div><div><dt>更新時間</dt><dd>'+fmt(last.updated_at)+'</dd></div><div><dt>嘗試次數</dt><dd>'+esc(last.attempts)+'</dd></div>'+(last.last_error?'<div><dt>失敗原因</dt><dd>'+esc(last.last_error)+'</dd></div>':"")+'</dl>':empty("尚無推送紀錄","未啟用群組時建立的案件不會建立推送紀錄，也不會事後自動補送。");
+  return '<div class="alert '+alertClass+'"><strong>'+esc(headline)+'</strong><br>'+esc(detail)+'</div><section class="panel"><div class="panel-head"><h2>LINE 通知狀態</h2><small>已辨識 '+esc(line.connectedGroups)+' 個有效群組</small></div><div class="panel-body">'+lastResult+'</div></section>';
 }
 const viewInfo={board:["TEAM WORKSPACE","工作台","聚焦新開案與等候施打；完成後可至案件管理查閱。"],mine:["TEAM MEMBERS","成員案件","選擇施打者，查看接單與完成紀錄。"],stats:["PERFORMANCE INDICATORS","成效指標","整合施打量、案件完成比例、取消原因與處理時效。"],admin:["TASK MANAGEMENT","案件管理","查詢、編輯與匯出團隊的完整案件紀錄。"],members:["TEAM MEMBERS","團隊成員","維護施打者名單與啟用狀態。"],notifications:["TEAM NOTIFICATIONS","通知紀錄","追蹤 LINE 通知，分別確認案件與訊息的結果。"]};
 let renderVersion=0;
