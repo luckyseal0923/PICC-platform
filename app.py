@@ -1,6 +1,7 @@
 """Independent PICC application. No connections to the old production system."""
 from __future__ import annotations
 import argparse
+import base64
 import csv
 import hashlib
 import hmac
@@ -68,6 +69,8 @@ def create_app(config=None):
         DATABASE=str(ROOT / os.environ.get("PICC_DATABASE", f"instance/picc{'-demo' if demo else ''}.sqlite3")),
         LIFF_ID=os.environ.get("PICC_LIFF_ID", ""),
         LINE_CHANNEL_ID=os.environ.get("LINE_LOGIN_CHANNEL_ID", ""),
+        LINE_MESSAGING_CHANNEL_SECRET=os.environ.get("LINE_MESSAGING_CHANNEL_SECRET", ""),
+        LINE_MESSAGING_CHANNEL_ACCESS_TOKEN=os.environ.get("LINE_MESSAGING_CHANNEL_ACCESS_TOKEN", ""),
         BOOTSTRAP_ADMIN=os.environ.get("PICC_BOOTSTRAP_ADMIN_LINE_ID", ""),
         NOTIFICATION_WEBHOOK=os.environ.get("PICC_NOTIFICATION_WEBHOOK", ""),
         NOTIFICATION_SECRET=os.environ.get("PICC_NOTIFICATION_SECRET", ""),
@@ -143,6 +146,25 @@ def create_app(config=None):
           actor_name TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER DEFAULT 0,
           payload TEXT NOT NULL, last_error TEXT
         );
+        CREATE TABLE IF NOT EXISTS line_recipients(
+          source_id TEXT PRIMARY KEY,
+          source_type TEXT NOT NULL CHECK(source_type IN ('user','group','room')),
+          actor_user_id TEXT,
+          active INTEGER NOT NULL DEFAULT 1,
+          last_event_type TEXT NOT NULL,
+          last_event_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS line_webhook_events(
+          webhook_event_id TEXT PRIMARY KEY,
+          event_type TEXT NOT NULL,
+          source_type TEXT,
+          source_id TEXT,
+          is_redelivery INTEGER NOT NULL DEFAULT 0,
+          received_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS line_recipient_active ON line_recipients(active,source_type);
         """)
         if "reorder_of" not in {r["name"] for r in db().execute("PRAGMA table_info(tasks)") }:
             db().execute("ALTER TABLE tasks ADD COLUMN reorder_of TEXT")
@@ -238,7 +260,7 @@ def create_app(config=None):
         shared = request.path.startswith(("/api/entry/", "/api/workspace/"))
         if shared and not app.config["DEMO_MODE"]:
             raise ApiError("系統尚未完成連線設定，請聯絡管理者或重新整理後再試。", 503)
-        public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/entry/config", "/api/workspace/config")
+        public = ("/api/config", "/api/health", "/api/auth/demo", "/api/auth/line", "/api/line/webhook", "/api/entry/config", "/api/workspace/config")
         if request.path.startswith("/api/") and request.path not in public:
             user()
             if request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -324,6 +346,78 @@ def create_app(config=None):
     @app.get("/api/health")
     def health():
         return jsonify(ok=True)
+
+    @app.post("/api/line/webhook")
+    def line_webhook():
+        """Receive LINE events without retaining chat text or clinical content."""
+        channel_secret = app.config["LINE_MESSAGING_CHANNEL_SECRET"]
+        if not channel_secret:
+            raise ApiError("LINE Webhook 尚未完成伺服器設定", 503)
+
+        raw_body = request.get_data(cache=False)
+        expected = base64.b64encode(
+            hmac.new(channel_secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+        ).decode("ascii")
+        supplied = request.headers.get("X-Line-Signature", "")
+        if not supplied or not hmac.compare_digest(supplied, expected):
+            raise ApiError("LINE Webhook 簽章驗證失敗", 401)
+
+        try:
+            payload = json.loads(raw_body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ApiError("LINE Webhook 資料格式錯誤")
+        events = payload.get("events") if isinstance(payload, dict) else None
+        if not isinstance(events, list):
+            raise ApiError("LINE Webhook 缺少事件清單")
+
+        received_at = now()
+        connection = db()
+        connection.execute("BEGIN IMMEDIATE")
+        accepted = 0
+        try:
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                event_type = text(event.get("type"), 50) or "unknown"
+                source = event.get("source") if isinstance(event.get("source"), dict) else {}
+                source_type = text(source.get("type"), 20)
+                source_key = {"user": "userId", "group": "groupId", "room": "roomId"}.get(source_type)
+                source_id = text(source.get(source_key), 100) if source_key else ""
+                actor_user_id = text(source.get("userId"), 100)
+                delivery = event.get("deliveryContext") if isinstance(event.get("deliveryContext"), dict) else {}
+                event_id = text(event.get("webhookEventId"), 160)
+                if not event_id:
+                    canonical = json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    event_id = "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                inserted = connection.execute(
+                    "INSERT OR IGNORE INTO line_webhook_events(webhook_event_id,event_type,source_type,source_id,is_redelivery,received_at) VALUES(?,?,?,?,?,?)",
+                    (event_id, event_type, source_type or None, source_id or None,
+                     1 if delivery.get("isRedelivery") else 0, received_at),
+                ).rowcount
+                if not inserted:
+                    continue
+                accepted += 1
+                if source_type not in {"user", "group", "room"} or not source_id:
+                    continue
+                active = 0 if event_type in {"unfollow", "leave"} else 1
+                connection.execute(
+                    """INSERT INTO line_recipients(source_id,source_type,actor_user_id,active,last_event_type,last_event_at,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?)
+                       ON CONFLICT(source_id) DO UPDATE SET
+                         source_type=excluded.source_type,
+                         actor_user_id=COALESCE(NULLIF(excluded.actor_user_id,''),line_recipients.actor_user_id),
+                         active=excluded.active,
+                         last_event_type=excluded.last_event_type,
+                         last_event_at=excluded.last_event_at,
+                         updated_at=excluded.updated_at""",
+                    (source_id, source_type, actor_user_id or None, active, event_type,
+                     received_at, received_at, received_at),
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        return jsonify(ok=True, accepted=accepted)
 
     @app.get("/api/config")
     def config_endpoint():

@@ -1,6 +1,6 @@
 # PICC-platform
 
-院內 PICC 建案、預約施打與施打回報平台。新版以 Supabase 作為正式資料後端；本機提供獨立的假資料預覽，n8n 的 LINE 群組通知留待後續串接。
+院內 PICC 建案、預約施打與施打回報平台。新版以 Supabase 作為正式資料後端；本機提供獨立的假資料預覽。LINE Messaging API Webhook 已提供安全接收端點，實際推播仍需在部署環境設定金鑰與通知對象。
 
 ## 首頁與三個手機入口
 
@@ -108,6 +108,16 @@ Supabase 手機入口使用 `public.picc_v2_entry_api`，僅提供名單、建�
 2. 在 Coolify 的 **PICC-Platform 網站 application** 加入 `NEXT_PUBLIC_SUPABASE_URL` 與 `NEXT_PUBLIC_SUPABASE_ANON_KEY`，設為 Runtime 可用。也接受 `SUPABASE_URL`／`SUPABASE_ANON_KEY` 別名。這些是前端公開連線設定，**不要填 service-role／secret key**。本機非示範模式可讀取被 Git 忽略的 `.env.local`；它不會提交到 GitHub。
 3. 執行 `npm ci`、`npm run build:client`，重新部署網站。Python 服務的 `/assets/config.js` 在執行時產生設定，並將指定的 Supabase 網域加入瀏覽器連線政策；不必把 key 寫進程式庫。若改採純靜態 `dist/` 部署，則需先在 `static/config.js` 設定公開值後重新建置。
 4. 在電腦工作站的「團隊成員」建立施打者名單，只需姓名與啟用狀態，不需要 LINE 或 Supabase Auth 帳號。
+
+### LINE Messaging API Webhook
+
+正式站的 Webhook URL：
+
+```text
+https://picc-platform.wfhai.org/api/line/webhook
+```
+
+在伺服器部署環境設定 `LINE_MESSAGING_CHANNEL_SECRET` 與 `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`，不要提交到 Git。Webhook 會驗證 `X-Line-Signature`，只保存接收來源 ID、事件種類與時間，不保存聊天文字。部署完成後再到 LINE Developers Console 啟用 Webhook 並按 **Verify**。若要取得群組 ID，還需要允許 Bot 加入群組，並將 Bot 邀入指定群組。
 5. 先用假資料驗證建案 → 預約 → 回報、取消 → 重新建案與施打量。目前 `trialMode: true` 會顯示測試標示；備份還原與院內存取限制需另外驗收。
 
 **免登入入口的存取範圍依賴網路限制。** 正式病人資料應置於院內網路或 VPN 的限制範圍，前端與 Supabase API 都必須受限；只有公開網址或把連結留在群組，不能限制外部存取。此階段僅供假資料驗收，LINE 通知尚未啟用。

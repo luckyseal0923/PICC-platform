@@ -1,4 +1,7 @@
+import base64
 import csv
+import hashlib
+import hmac
 import io
 import json
 from pathlib import Path
@@ -47,6 +50,9 @@ class PiccWorkflows(unittest.TestCase):
         response = self.client.post("/api/tasks", json=payload, headers=self.headers)
         self.assertEqual(response.status_code, 201, response.json)
         return response.json["task"]
+
+    def line_signature(self, raw_body, secret="line-webhook-test-secret"):
+        return base64.b64encode(hmac.new(secret.encode(), raw_body, hashlib.sha256).digest()).decode()
 
     def claim(self, task, operator="demo-a"):
         return self.client.post(f"/api/tasks/{task['id']}/claim",
@@ -159,6 +165,59 @@ class PiccWorkflows(unittest.TestCase):
         self.assertEqual(anonymous.get("/api/stats").status_code, 401)
         self.assertEqual(self.client.post("/api/tasks", json={}).status_code, 403)
         self.assertEqual(self.client.post("/api/tasks", json={}, headers={**self.headers, "Origin": "https://foreign.invalid"}).status_code, 403)
+
+    def test_line_webhook_requires_configuration_and_valid_signature(self):
+        anonymous = self.app.test_client()
+        raw = json.dumps({"events": []}, separators=(",", ":")).encode()
+        self.assertEqual(anonymous.post("/api/line/webhook", data=raw, content_type="application/json").status_code, 503)
+        self.app.config["LINE_MESSAGING_CHANNEL_SECRET"] = "line-webhook-test-secret"
+        self.assertEqual(anonymous.post("/api/line/webhook", data=raw, content_type="application/json",
+                                        headers={"X-Line-Signature": "invalid"}).status_code, 401)
+        verified = anonymous.post("/api/line/webhook", data=raw, content_type="application/json",
+                                  headers={"X-Line-Signature": self.line_signature(raw)})
+        self.assertEqual(verified.status_code, 200, verified.json)
+        self.assertEqual(verified.json, {"ok": True, "accepted": 0})
+
+    def test_line_webhook_tracks_targets_without_storing_message_text_and_deduplicates(self):
+        self.app.config["LINE_MESSAGING_CHANNEL_SECRET"] = "line-webhook-test-secret"
+        anonymous = self.app.test_client()
+        event = {
+            "type": "message", "webhookEventId": "01H-WEBHOOK-TEST",
+            "deliveryContext": {"isRedelivery": False},
+            "source": {"type": "group", "groupId": "Cgroup-test", "userId": "Uactor-test"},
+            "message": {"id": "message-test", "type": "text", "text": "病人姓名不應保存"},
+        }
+        raw = json.dumps({"events": [event]}, ensure_ascii=False, separators=(",", ":")).encode()
+        headers = {"X-Line-Signature": self.line_signature(raw)}
+        first = anonymous.post("/api/line/webhook", data=raw, content_type="application/json", headers=headers)
+        second = anonymous.post("/api/line/webhook", data=raw, content_type="application/json", headers=headers)
+        self.assertEqual(first.json["accepted"], 1)
+        self.assertEqual(second.json["accepted"], 0)
+        with closing(sqlite3.connect(self.path)) as connection:
+            recipient = connection.execute(
+                "SELECT source_type,source_id,actor_user_id,active,last_event_type FROM line_recipients"
+            ).fetchone()
+            self.assertEqual(recipient, ("group", "Cgroup-test", "Uactor-test", 1, "message"))
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM line_webhook_events").fetchone()[0], 1)
+            database_text = " ".join(
+                str(value) for row in connection.execute("SELECT * FROM line_webhook_events") for value in row
+            )
+            self.assertNotIn("病人姓名不應保存", database_text)
+
+    def test_line_webhook_marks_a_departed_target_inactive(self):
+        self.app.config["LINE_MESSAGING_CHANNEL_SECRET"] = "line-webhook-test-secret"
+        anonymous = self.app.test_client()
+        for event_type, event_id in (("join", "join-event"), ("leave", "leave-event")):
+            event = {"type": event_type, "webhookEventId": event_id,
+                     "source": {"type": "group", "groupId": "Cdeparted-group"}}
+            raw = json.dumps({"events": [event]}, separators=(",", ":")).encode()
+            response = anonymous.post("/api/line/webhook", data=raw, content_type="application/json",
+                                      headers={"X-Line-Signature": self.line_signature(raw)})
+            self.assertEqual(response.status_code, 200, response.json)
+        with closing(sqlite3.connect(self.path)) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT active,last_event_type FROM line_recipients WHERE source_id='Cdeparted-group'"
+            ).fetchone(), (0, "leave"))
 
     def test_three_mobile_entries_have_no_patient_data_before_login(self):
         anonymous = self.app.test_client()
