@@ -176,7 +176,7 @@ class PiccWorkflows(unittest.TestCase):
         verified = anonymous.post("/api/line/webhook", data=raw, content_type="application/json",
                                   headers={"X-Line-Signature": self.line_signature(raw)})
         self.assertEqual(verified.status_code, 200, verified.json)
-        self.assertEqual(verified.json, {"ok": True, "accepted": 0})
+        self.assertEqual(verified.json, {"ok": True, "accepted": 0, "testReplies": 0})
 
     def test_line_webhook_tracks_targets_without_storing_message_text_and_deduplicates(self):
         self.app.config["LINE_MESSAGING_CHANNEL_SECRET"] = "line-webhook-test-secret"
@@ -218,6 +218,51 @@ class PiccWorkflows(unittest.TestCase):
             self.assertEqual(connection.execute(
                 "SELECT active,last_event_type FROM line_recipients WHERE source_id='Cdeparted-group'"
             ).fetchone(), (0, "leave"))
+
+    def test_line_webhook_test_phrase_replies_without_persisting_text(self):
+        self.app.config.update(
+            LINE_MESSAGING_CHANNEL_SECRET="line-webhook-test-secret",
+            LINE_MESSAGING_CHANNEL_ACCESS_TOKEN="line-access-token-test",
+        )
+        event = {
+            "type": "message", "webhookEventId": "webhook-reply-test", "replyToken": "reply-token-test",
+            "source": {"type": "group", "groupId": "Creply-group", "userId": "Ureply-user"},
+            "message": {"id": "message-reply-test", "type": "text", "text": "Webhook 測試"},
+        }
+        raw = json.dumps({"events": [event]}, ensure_ascii=False, separators=(",", ":")).encode()
+
+        class FakeResponse:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+
+        class FakeOpener:
+            def open(self, line_request, timeout):
+                self.request = line_request
+                self.timeout = timeout
+                return FakeResponse()
+
+        opener = FakeOpener()
+        with patch("app.urlrequest.build_opener", return_value=opener):
+            response = self.app.test_client().post(
+                "/api/line/webhook", data=raw, content_type="application/json",
+                headers={"X-Line-Signature": self.line_signature(raw)},
+            )
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json["testReplies"], 1)
+        self.assertEqual(opener.request.full_url, "https://api.line.me/v2/bot/message/reply")
+        self.assertEqual(opener.request.headers["Authorization"], "Bearer line-access-token-test")
+        sent = json.loads(opener.request.data)
+        self.assertEqual(sent["replyToken"], "reply-token-test")
+        self.assertEqual(sent["messages"][0]["text"], "PICC 網站 Webhook 已成功連線")
+        with closing(sqlite3.connect(self.path)) as connection:
+            database_text = " ".join(
+                str(value) for table in ("line_webhook_events", "line_recipients")
+                for row in connection.execute("SELECT * FROM " + table) for value in row
+            )
+        self.assertNotIn("Webhook 測試", database_text)
 
     def test_three_mobile_entries_have_no_patient_data_before_login(self):
         anonymous = self.app.test_client()

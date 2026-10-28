@@ -374,6 +374,7 @@ def create_app(config=None):
         connection = db()
         connection.execute("BEGIN IMMEDIATE")
         accepted = 0
+        test_reply_tokens = []
         try:
             for event in events:
                 if not isinstance(event, dict):
@@ -397,6 +398,12 @@ def create_app(config=None):
                 if not inserted:
                     continue
                 accepted += 1
+                message = event.get("message") if isinstance(event.get("message"), dict) else {}
+                if (event_type == "message" and message.get("type") == "text"
+                        and text(message.get("text"), 50) == "Webhook 測試"):
+                    reply_token = text(event.get("replyToken"), 200)
+                    if reply_token:
+                        test_reply_tokens.append(reply_token)
                 if source_type not in {"user", "group", "room"} or not source_id:
                     continue
                 active = 0 if event_type in {"unfollow", "leave"} else 1
@@ -417,7 +424,32 @@ def create_app(config=None):
         except Exception:
             connection.execute("ROLLBACK")
             raise
-        return jsonify(ok=True, accepted=accepted)
+
+        replied = 0
+        access_token = app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"]
+        if access_token:
+            class NoRedirect(urlrequest.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    return None
+            for reply_token in test_reply_tokens:
+                reply_payload = {
+                    "replyToken": reply_token,
+                    "messages": [{"type": "text", "text": "PICC 網站 Webhook 已成功連線"}],
+                }
+                reply_request = urlrequest.Request(
+                    "https://api.line.me/v2/bot/message/reply",
+                    data=json.dumps(reply_payload, ensure_ascii=False).encode("utf-8"),
+                    headers={"Content-Type": "application/json",
+                             "Authorization": "Bearer " + access_token},
+                    method="POST",
+                )
+                try:
+                    with urlrequest.build_opener(NoRedirect).open(reply_request, timeout=8) as response:
+                        if 200 <= response.status < 300:
+                            replied += 1
+                except (urlerror.URLError, ValueError):
+                    pass
+        return jsonify(ok=True, accepted=accepted, testReplies=replied)
 
     @app.get("/api/config")
     def config_endpoint():
