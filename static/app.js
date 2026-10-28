@@ -54,6 +54,13 @@ async function api(path, options = {}) {
   if(!res.ok) {if(res.status===401 && state.user){state.user=null;state.ready=false;state.tasks=[];$("#mainContent").textContent="連線已中斷，請重新整理。";} throw new Error(data.error || "操作未完成");}
   return data;
 }
+async function notifyCreatedTask(task) {
+  if(!task?.id)return;
+  try {
+    await fetch("/api/line/notify-task-created",{method:"POST",credentials:"same-origin",keepalive:true,
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id})});
+  } catch(_error) {/* LINE outages must not change the confirmed case result. */}
+}
 function userOptions(id) {
   const users=state.users.filter(u=>u.enabled),selected=users.some(u=>u.id===id);
   return (!selected?'<option value="">請選擇施打者</option>':"")+users.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===id?"selected":"")+'>'+esc(u.name)+'</option>').join("");
@@ -410,7 +417,7 @@ document.addEventListener("submit",async e=>{
   const type=form.dataset.form,id=form.dataset.id;
   let values=Object.fromEntries(new FormData(form).entries()),message="已儲存";
   try {
-    if(type==="create") {values.selfReport=form.dataset.self==="true";values.requestId=state.requestId;if(state.copiedFromTaskId)values.copiedFromTaskId=state.copiedFromTaskId;values.duplicateAcknowledged=values.duplicateAcknowledged==="true";const result=await api("/api/tasks",{method:"POST",body:values});if(result.requiresDuplicateConfirmation){duplicateWarning(result);return;}message=values.selfReport?"已完成回報，施打量已更新":state.copiedFromTaskId?"已建立新任務，原取消紀錄已保留":"已建立新開案任務";}
+    if(type==="create") {values.selfReport=form.dataset.self==="true";values.requestId=state.requestId;if(state.copiedFromTaskId)values.copiedFromTaskId=state.copiedFromTaskId;values.duplicateAcknowledged=values.duplicateAcknowledged==="true";const result=await api("/api/tasks",{method:"POST",body:values});if(result.requiresDuplicateConfirmation){duplicateWarning(result);return;}if(!values.selfReport)await notifyCreatedTask(result.task);message=values.selfReport?"已完成回報，施打量已更新":state.copiedFromTaskId?"已建立新任務，原取消紀錄已保留":"已建立新開案任務";}
     else if(type==="member") {values.id=id;values.enabled=values.enabled==="true";await api("/api/users",{method:"POST",body:values});message="已更新團隊成員";}
     else if(type==="import") {const result=await api("/api/import",{method:"POST",body:new FormData(form)});message="新增 "+result.added+" 筆、略過 "+result.skipped+" 筆"+(result.missingCompletionDate?"；"+result.missingCompletionDate+" 筆缺少完成日期":"");}
     else if(type==="announce") {const result=await api("/api/announce",{method:"POST",body:{}});message=result.simulated?"已建立示範通知紀錄，未發送 LINE":"已加入通知佇列，請查看通知紀錄";}

@@ -544,6 +544,9 @@ def create_app(config=None):
             raise ApiError("公開平台網址設定不正確", 503)
         booking_url = public_base + "/picc-booking/"
         message = ("📌 PICC 新案件已建立\n"
+                   f"姓名：{task.get('patientName', '')}\n"
+                   f"病歷號：{task.get('mrn', '')}\n"
+                   f"床號：{task.get('bedNo', '')}\n"
                    f"案件編號：{task.get('taskId', '')}\n"
                    "狀態：待預約施打\n"
                    "請至 PICC 平台查看並預約施打：\n" + booking_url)

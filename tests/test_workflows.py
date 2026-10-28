@@ -302,7 +302,7 @@ class PiccWorkflows(unittest.TestCase):
                 "SELECT notification_enabled FROM line_recipients WHERE source_id='Cnotification-group'"
             ).fetchone()[0], 1)
 
-    def test_new_pending_case_push_is_minimal_and_deduplicated(self):
+    def test_new_pending_case_push_has_required_identifiers_and_is_deduplicated(self):
         self.app.config["LINE_MESSAGING_CHANNEL_ACCESS_TOKEN"] = "line-access-token-test"
         task = self.create(patientName="DEMO 不可出現", mrn="SECRET-MRN", bedNo="SECRET-BED")
         with closing(sqlite3.connect(self.path)) as connection:
@@ -340,9 +340,10 @@ class PiccWorkflows(unittest.TestCase):
         message = payload["messages"][0]["text"]
         self.assertIn(task["taskId"], message)
         self.assertIn("https://picc-platform.wfhai.org/picc-booking/", message)
-        self.assertNotIn("DEMO 不可出現", message)
-        self.assertNotIn("SECRET-MRN", message)
-        self.assertNotIn("SECRET-BED", message)
+        self.assertIn("姓名：DEMO 不可出現", message)
+        self.assertIn("病歷號：SECRET-MRN", message)
+        self.assertIn("床號：SECRET-BED", message)
+        self.assertNotIn("備註", message)
 
     def test_production_notification_verifies_supabase_before_line_push(self):
         task_id = "f21ab2ca-2cb4-4ed8-bd7c-ecb761cd9e12"
@@ -377,7 +378,8 @@ class PiccWorkflows(unittest.TestCase):
             def open(self, outbound, timeout):
                 requests.append(outbound)
                 if outbound.full_url.endswith("/rest/v1/rpc/picc_v2_entry_api"):
-                    verified = {"task": {"id": task_id, "taskId": "PICC-2610-999", "status": "pending"}}
+                    verified = {"task": {"id": task_id, "taskId": "PICC-2610-999", "status": "pending",
+                                         "patientName": "測試姓名", "mrn": "TEST-MRN", "bedNo": "TEST-BED"}}
                     return FakeResponse(json.dumps(verified).encode())
                 return FakeResponse()
 

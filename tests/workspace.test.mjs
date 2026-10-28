@@ -36,6 +36,12 @@ test('full-width workbench retains its two active stages without dashboard cards
   const page=readFileSync(new URL('../static/index.html',import.meta.url),'utf8');
   assert.doesNotMatch(page,/data-view="mine"/);assert.match(page,/>案件管理<\/button>/);
 });
+test('desktop creation notifies LINE with only the internal task UUID',()=>{
+  const source=readFileSync(new URL('../static/app.js',import.meta.url),'utf8');
+  assert.match(source,/notifyCreatedTask\(result\.task\)/);
+  assert.match(source,/JSON\.stringify\(\{taskId:task\.id\}\)/);
+  assert.doesNotMatch(source,/JSON\.stringify\(\{taskId:task\.id,[^}]+(?:patientName|mrn|bedNo)/);
+});
 test('booked and report-stage cases have one report action and no extra performed action',()=>{
   const run=workspace();
   for(const status of ['claimed']){
