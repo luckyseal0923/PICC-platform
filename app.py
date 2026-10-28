@@ -578,14 +578,51 @@ def create_app(config=None):
         if public_origin.scheme != "https" or not public_origin.hostname or public_origin.username or public_origin.password:
             raise ApiError("公開平台網址設定不正確", 503)
         booking_url = public_base + "/picc-booking/"
-        message = ("📌 PICC 新案件已建立\n"
-                   f"姓名：{task.get('patientName', '')}\n"
-                   f"病歷號：{task.get('mrn', '')}\n"
-                   f"床號：{task.get('bedNo', '')}\n"
-                   f"案件編號：{task.get('taskId', '')}\n"
-                   "狀態：待預約施打\n"
-                   "請至 PICC 平台查看並預約施打：\n" + booking_url)
-        delivered = line_api("push", {"to": target_id, "messages": [{"type": "text", "text": message}]})
+        def detail_row(label, value):
+            return {
+                "type": "box", "layout": "baseline", "spacing": "sm",
+                "contents": [
+                    {"type": "text", "text": label, "color": "#64748B", "size": "sm", "flex": 2},
+                    {"type": "text", "text": text(value, 100) or "—", "color": "#14343B",
+                     "size": "md", "weight": "bold", "wrap": True, "flex": 5},
+                ],
+            }
+
+        message = {
+            "type": "flex",
+            "altText": "PICC 新案件已建立，請開啟 LINE 查看案件資訊",
+            "contents": {
+                "type": "bubble", "size": "mega",
+                "header": {
+                    "type": "box", "layout": "vertical", "backgroundColor": "#0F766E",
+                    "paddingAll": "20px",
+                    "contents": [
+                        {"type": "text", "text": "PICC 新案件", "color": "#FFFFFF",
+                         "size": "xl", "weight": "bold"},
+                        {"type": "text", "text": "已建立・待預約施打", "color": "#CCFBF1",
+                         "size": "sm", "margin": "sm"},
+                    ],
+                },
+                "body": {
+                    "type": "box", "layout": "vertical", "spacing": "md", "paddingAll": "20px",
+                    "contents": [
+                        detail_row("姓名", task.get("patientName")),
+                        detail_row("病歷號", task.get("mrn")),
+                        detail_row("床號", task.get("bedNo")),
+                        {"type": "separator", "margin": "md", "color": "#DDE7E5"},
+                        detail_row("案件編號", task.get("taskId")),
+                    ],
+                },
+                "footer": {
+                    "type": "box", "layout": "vertical", "paddingAll": "16px",
+                    "contents": [{
+                        "type": "button", "style": "primary", "height": "sm", "color": "#0F766E",
+                        "action": {"type": "uri", "label": "前往預約施打", "uri": booking_url},
+                    }],
+                },
+            },
+        }
+        delivered = line_api("push", {"to": target_id, "messages": [message]})
         db().execute("UPDATE line_outbound_events SET status=?,last_error=?,updated_at=? WHERE event_key=?",
                      ("sent" if delivered else "failed", None if delivered else "LINE API did not confirm delivery",
                       now(), event_key))

@@ -396,13 +396,20 @@ class PiccWorkflows(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         payload = json.loads(requests[0].data)
         self.assertEqual(payload["to"], "Cnotification-group")
-        message = payload["messages"][0]["text"]
-        self.assertIn(task["taskId"], message)
-        self.assertIn("https://picc-platform.wfhai.org/picc-booking/", message)
-        self.assertIn("姓名：DEMO 不可出現", message)
-        self.assertIn("病歷號：SECRET-MRN", message)
-        self.assertIn("床號：SECRET-BED", message)
-        self.assertNotIn("備註", message)
+        message = payload["messages"][0]
+        self.assertEqual(message["type"], "flex")
+        self.assertNotIn("SECRET-MRN", message["altText"])
+        serialized = json.dumps(message, ensure_ascii=False)
+        self.assertIn(task["taskId"], serialized)
+        self.assertIn("DEMO 不可出現", serialized)
+        self.assertIn("SECRET-MRN", serialized)
+        self.assertIn("SECRET-BED", serialized)
+        self.assertNotIn("備註", serialized)
+        button = message["contents"]["footer"]["contents"][0]
+        self.assertEqual(button["action"], {
+            "type": "uri", "label": "前往預約施打",
+            "uri": "https://picc-platform.wfhai.org/picc-booking/",
+        })
 
     def test_production_notification_verifies_supabase_before_line_push(self):
         task_id = "f21ab2ca-2cb4-4ed8-bd7c-ecb761cd9e12"
