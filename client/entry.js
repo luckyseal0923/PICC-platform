@@ -3,9 +3,9 @@ import {ENTRY_ROUTES,entryPage,createEntryController} from "./entry-controller.j
 const $=selector=>document.querySelector(selector);
 const escape=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const page=entryPage(location.pathname);
-const info={create:["PICC 任務建立","填寫病人資料，建立一筆新開案案件。"],booking:["PICC 新開案清單","以下案件尚未被接單，請選擇施打人後點選「預約施打」。"],report:["PICC 施打回報","顯示等候施打案件，完成回報後會從清單移出。"]};
+const info={create:["PICC 任務建立","填寫床號、病歷號與姓名。"],booking:["PICC 新開案清單","選擇施打人，接單後移至施打回報。"],report:["PICC 施打回報","完成施打後填寫回報。"]};
 const state={members:[],tasks:[],selfReport:false,draft:{},original:null,activeTask:null,busy:false,initialTaskOpened:false,loadVersion:0};
-const dateFormat=new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"});
+const dateFormat=new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
 const client=createEntryController({onUnavailable:()=>{
   state.members=[];state.tasks=[];state.activeTask=null;state.original=null;state.draft={};
   state.selfReport=false;state.initialTaskOpened=false;state.loadVersion++;
@@ -59,8 +59,8 @@ function renderCreate(){
     '<label for="mrn">病歷號 *</label><input id="mrn" name="mrn" maxlength="100" placeholder="請輸入病歷號" inputmode="numeric" autocomplete="off" required value="'+escape(values.mrn||"")+'">'+
     '<label for="patientName">病人姓名 *</label><input id="patientName" name="patientName" maxlength="100" placeholder="請輸入病人姓名" autocomplete="off" required value="'+escape(values.patientName||"")+'">'+
     (state.selfReport?reportFields(values):"")+notes(values.remark||"")+'<div id="duplicateWarning" class="message duplicate-warning" role="alert" tabindex="-1" hidden></div>'+
-    '<button class="button primary full" type="submit">'+(state.selfReport?"送出施打回報":"送出")+'</button></form>'+
-    (!state.original&&!state.selfReport?'<button class="button self-report full" type="button" data-action="toggle-self">自起單・自回報</button>':"")+'</section>';
+    '<div class="create-actions'+(state.original||state.selfReport?' single':'')+'"><button class="button primary" type="submit">'+(state.selfReport?"送出施打回報":"送出")+'</button>'+
+    (!state.original&&!state.selfReport?'<button class="button self-report" type="button" data-action="toggle-self">自起單・自回報</button>':"")+'</div></form></section>';
 }
 function renderSelfReportComplete(task){
   $("#pageTitle").textContent="PICC 起單與回報完成";
@@ -78,14 +78,14 @@ function waiting(task){
 }
 function taskCard(task){
   const booking=page==="booking",date=new Date(task.createdAt);
-  return '<article class="card case-card"><h3>'+escape(task.patientName)+'</h3><p class="patient-meta"><span>床號 '+escape(task.bedNo)+'</span><span>｜ 病歷號 '+escape(task.mrn)+'</span></p>'+
-    '<p class="task-number">任務編號：'+escape(task.taskId)+'</p>'+(!booking?'<span class="case-state">'+"等候施打"+'</span>':"")+
-    (!booking?'<p class="case-time">起單時間 '+(Number.isNaN(date.getTime())?'未記錄':dateFormat.format(date))+'</p><p class="assignee">接單者：'+escape(task.claimedBy||"未記錄")+'</p><p class="waiting">'+waiting(task)+'</p>':"")+
+  return '<article class="card case-card"><div class="case-heading"><h3>'+escape(task.patientName)+'</h3><span class="case-state">'+(booking?'新開案':'等候施打')+'</span></div>'+
+    '<dl class="case-identifiers"><div><dt>床號</dt><dd>'+escape(task.bedNo)+'</dd></div><div><dt>病歷號</dt><dd>'+escape(task.mrn)+'</dd></div></dl>'+
+    '<p class="task-number">案號 '+escape(task.taskId)+'</p>'+
+    (!booking?'<div class="case-progress"><p class="assignee">接單 <strong>'+escape(task.claimedBy||"未記錄")+'</strong></p><p class="waiting">'+waiting(task)+'</p></div><p class="case-time">起單 '+(Number.isNaN(date.getTime())?'未記錄':dateFormat.format(date))+'</p>':"")+
     (task.hasDifficultHistory?'<p class="difficult">曾有困難放置紀錄</p>':"")+
-    (task.remark?'<p class="help">備註：'+escape(task.remark)+'</p>':"")+
-    (booking?'<form data-form="claim" data-id="'+escape(task.id)+'"><label for="operator-'+escape(task.id)+'">施打人</label><select id="operator-'+escape(task.id)+'" name="operatorId" required>'+memberOptions()+'</select><button type="submit" class="button primary">預約施打</button></form>':
+    (booking?'<form data-form="claim" data-id="'+escape(task.id)+'"><label class="sr-only" for="operator-'+escape(task.id)+'">施打人</label><select id="operator-'+escape(task.id)+'" name="operatorId" required>'+memberOptions()+'</select><button type="submit" class="button primary">預約施打</button></form>':
       '<div class="case-actions"><button type="button" class="button primary" data-action="complete" data-id="'+escape(task.id)+'">施打回報</button></div>')+
-    '<div class="case-cancel"><button type="button" class="quiet-button" data-action="cancel" data-id="'+escape(task.id)+'">取消施打</button></div></article>';
+    '<div class="case-footer">'+(task.remark?'<details class="case-note"><summary>查看備註</summary><p>'+escape(task.remark)+'</p></details>':'<span aria-hidden="true"></span>')+'<button type="button" class="quiet-button case-cancel" data-action="cancel" data-id="'+escape(task.id)+'">取消施打</button></div></article>';
 }
 function renderList(){
   $("#entryContent").innerHTML='<div class="toolbar"><span>'+state.tasks.length+' 筆'+(page==="booking"?'新開案':'等候施打')+'案件</span><button type="button" class="quiet-button" data-action="refresh">重新整理</button></div>'+
@@ -205,7 +205,7 @@ async function boot(){
     await client.boot();
     const config=client.state.config;
     $("#previewLabel").hidden=!(config.demo||config.trialMode);
-    if(config.trialMode)$("#previewLabel").textContent="測試環境 · 使用假資料";
+    if(config.trialMode){$("#previewLabel").textContent="測試環境";$("#previewLabel").title="試用入口，請使用測試資料。";}
     await enter();
   }catch(error){$("#entryContent").hidden=true;message(error.message,true);}
 }
