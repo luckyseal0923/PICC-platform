@@ -51,8 +51,13 @@ function link(pageKey,text,id=""){
   return '<a class="button secondary" href="'+ENTRY_ROUTES[pageKey]+(id?'?'+new URLSearchParams({task:id}):'')+'">'+escape(text)+'</a>';
 }
 function renderCreate(){
+  document.body.dataset.mode=state.selfReport?"self-report":"general";
+  const title=state.selfReport?"PICC 自起單・自回報":info.create[0];
+  document.title=title;$("#pageTitle").textContent=title;
+  $("#pageDescription").textContent=state.selfReport?"直接建立案件並填寫已完成的施打紀錄。":info.create[1];
+  document.querySelector('meta[name="theme-color"]').content=state.selfReport?"#714197":"#12665d";
   const values=state.draft;
-  $("#entryContent").innerHTML='<section class="card create-card">'+
+  $("#entryContent").innerHTML='<section class="card create-card'+(state.selfReport?' self-report-card':'')+'">'+
     (state.original?'<div class="reorder-note">由已取消案件 '+escape(state.original.taskId)+' 重新建案。原單與取消原因會保留，新單使用新的編號。</div>':"")+
     (state.selfReport?'<h2>自起單・自回報</h2><p class="help">直接記錄此次已完成的施打。</p>':"")+
     '<form data-form="create"><label for="bedNo">床號 *</label><input id="bedNo" name="bedNo" maxlength="100" placeholder="例如：10906" autocomplete="off" required value="'+escape(values.bedNo||"")+'">'+

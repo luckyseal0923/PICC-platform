@@ -9,6 +9,11 @@
   color:var(--ink); color-scheme:light; -webkit-font-smoothing:antialiased;
 }
 *{box-sizing:border-box}body{margin:0;background:var(--bg)}[hidden]{display:none!important}
+/* Keep native iOS date/time controls aligned with adjacent form fields. */
+fieldset,.form-grid,.field{min-width:0;min-inline-size:0;max-width:100%}
+input[type=date],input[type=time],input[type=datetime-local]{display:block;box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-inline-size:0;-webkit-appearance:none;appearance:none;overflow:hidden;text-align:left}
+input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and-time-value,input[type=datetime-local]::-webkit-date-and-time-value{min-width:0;text-align:left}
+input[type=date]::-webkit-datetime-edit,input[type=time]::-webkit-datetime-edit,input[type=datetime-local]::-webkit-datetime-edit{min-width:0;padding:0;text-align:left}
 button,input,select,textarea{font:inherit}button{cursor:pointer}button,a,input,select,textarea{outline-offset:4px}
 button:focus-visible,a:focus-visible{outline:3px solid #3b9c8e}
 input:focus,select:focus,textarea:focus{outline:3px solid #12665d26;border-color:var(--teal)}
