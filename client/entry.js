@@ -193,11 +193,13 @@ document.addEventListener("submit",async event=>{
       await afterWrite(task,"預約完成，案件已移至等候施打清單。",link("report","前往施打回報",task.id));
     }else if(form.dataset.form==="complete"){
       const task=await client.complete(state.activeTask,values);$("#entryDialog").close();
-      await afterWrite(task,"完成回報已儲存，施打量已更新。案件已從等候施打清單移除。");
+      await afterWrite(task,"完成回報已儲存，施打量已更新。案件已從等候施打清單移除。"+
+        (task.lineNotificationDelivered===false?"（LINE 群組通知未送達，請重新整理後再確認。）":""));
     }else if(form.dataset.form==="cancel"){
       const task=await client.cancel(state.activeTask,values.reason,values.detail||"");
       $("#entryDialog").close();
-      await afterWrite(task,"已取消施打，原單與取消原因均已保留。",
+      await afterWrite(task,"已取消施打，原單與取消原因均已保留。"+
+        (task.lineNotificationDelivered===false?"（LINE 群組通知未送達，請重新整理後再確認。）":""),
         '<p class="receipt-details">取消原因：'+escape(task.cancelReason)+(task.cancelDetail?'；'+escape(task.cancelDetail):'')+'</p><a class="button secondary" href="'+ENTRY_ROUTES.create+'?'+new URLSearchParams({from:task.id})+'">需要再次施打時，重新建案</a>');
     }
   });

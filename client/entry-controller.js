@@ -5,7 +5,8 @@ export function entryPage(path){
   return Object.keys(ENTRY_ROUTES).find(key=>ENTRY_ROUTES[key].replace(/\/+$/,"")===normalized)||"create";
 }
 export function createEntryController({fetcher=globalThis.fetch,adapter=()=>globalThis.PiccSupabase,
-  notificationFetcher=globalThis.fetch,uuid=()=>globalThis.crypto.randomUUID(),onUnavailable=()=>{}}={}){
+  notificationFetcher=globalThis.fetch,notificationDelay=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+  uuid=()=>globalThis.crypto.randomUUID(),onUnavailable=()=>{}}={}){
   const state={config:{},actor:null,csrf:""};
   let draft=null;
   const connected=()=>adapter()?.enabled();
@@ -41,10 +42,16 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
     }catch(_error){/* A notification outage must never undo or misreport a committed clinical workflow. */}
   }
   async function notifyStatus(task,event){
-    try{
-      await notificationFetcher("/api/line/notify-task-status",{method:"POST",credentials:"same-origin",keepalive:true,
-        headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id,event})});
-    }catch(_error){/* A notification outage must never undo or misreport a committed clinical workflow. */}
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        const response=await notificationFetcher("/api/line/notify-task-status",{method:"POST",credentials:"same-origin",keepalive:true,
+          headers:{"Content-Type":"application/json"},body:JSON.stringify({taskId:task.id,event})});
+        const result=await response.json();
+        if(response.ok&&result.delivered===true)return true;
+      }catch(_error){/* Retry below; a LINE outage must not undo the committed clinical workflow. */}
+      if(attempt<2)await notificationDelay(400*(attempt+1));
+    }
+    return false;
   }
   return {
     state,
@@ -90,13 +97,13 @@ export function createEntryController({fetcher=globalThis.fetch,adapter=()=>glob
     async complete(task,values){
       requireReady();const completed=updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/complete",{
         method:"POST",body:{...values,version:task.version}}),"completed",task.id);
-      await notifyStatus(completed,"completed");return completed;
+      completed.lineNotificationDelivered=await notifyStatus(completed,"completed");return completed;
     },
     async cancel(task,reason,detail){
       requireReady();if(!reason||(reason==="其他"&&!detail.trim()))throw new Error("請選擇取消原因；選其他時請補充說明");
       const cancelled=updated(await request("/api/tasks/"+encodeURIComponent(task.id)+"/cancel",{
         method:"POST",body:{version:task.version,reason,detail}}),"cancelled",task.id);
-      await notifyStatus(cancelled,"cancelled");return cancelled;
+      cancelled.lineNotificationDelivered=await notifyStatus(cancelled,"cancelled");return cancelled;
     }
   };
 }

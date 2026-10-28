@@ -107,6 +107,18 @@ test("completion and cancellation request their LINE status notifications after 
   ]);
 });
 
+test("a status notification retries transient failures and reports delivery on the task",async()=>{
+  let attempts=0;
+  const controlled=createEntryController({adapter:()=>null,notificationDelay:async()=>{},fetcher:async path=>{
+      if(path==="/api/entry/config")return response({demo:true,loginRequired:false,user:shared,csrf:"test-csrf"});
+      if(path.endsWith("/complete"))return response({task:{id:"task",status:"completed"}});
+      throw new Error("unexpected path "+path);
+    },notificationFetcher:async()=>++attempts<3?response({ok:false,delivered:false},503):response({ok:true,delivered:true})});
+  await controlled.boot();
+  const task=await controlled.complete({id:"task",version:1},{operatorId:"demo-b"});
+  assert.equal(attempts,3);assert.equal(task.lineNotificationDelivered,true);
+});
+
 test("self-report requires a confirmed completed response and preserves retry identity on an ambiguous result",async()=>{
   const payloads=[];let confirmed=false;
   const {client}=scenario((path,options)=>{payloads.push(JSON.parse(options.body));return response({task:{id:"self-report",status:confirmed?"completed":"pending"}});});
